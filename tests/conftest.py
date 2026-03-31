@@ -6,12 +6,6 @@ import pytest
 
 
 @pytest.fixture
-def mock_dbus():
-    """Mock D-Bus connection - returns None for testing."""
-    return None
-
-
-@pytest.fixture
 def mock_config():
     """Valid sensor configuration for testing."""
     return {

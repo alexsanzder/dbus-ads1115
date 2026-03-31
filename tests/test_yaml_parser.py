@@ -3,7 +3,7 @@ Tests for YAML parser (parse_simple_yaml function).
 """
 
 import pytest
-from dbus_ads1115.dbus_ads1115 import parse_simple_yaml
+from tests.yaml_parser import parse_simple_yaml
 
 
 class TestYamlParserBasic:
