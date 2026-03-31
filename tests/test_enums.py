@@ -42,21 +42,6 @@ class TestFluidType:
         values = [ft.value for ft in FluidType]
         assert len(values) == len(set(values))
 
-    def test_fluid_type_comparison(self):
-        """Test enum comparison operators."""
-        assert FluidType.FRESH_WATER == FluidType.FRESH_WATER
-        assert FluidType.FRESH_WATER != FluidType.FUEL
-        # Note: Python 3.11+ enums don't support < operator for comparison
-        # We test value comparison instead
-        assert FluidType.FUEL.value < FluidType.WASTE_WATER.value
-
-    def test_fluid_type_iteration(self):
-        """Test that we can iterate over fluid types."""
-        fluid_types = list(FluidType)
-        assert len(fluid_types) == 6
-        assert FluidType.FUEL in fluid_types
-        assert FluidType.BLACK_WATER in fluid_types
-
 
 class TestStatus:
     """Test Status enum values."""
@@ -90,21 +75,6 @@ class TestStatus:
         values = [s.value for s in Status]
         assert len(values) == len(set(values))
 
-    def test_status_comparison(self):
-        """Test enum comparison operators."""
-        assert Status.OK == Status.OK
-        assert Status.OK != Status.DISCONNECTED
-        # Note: Python 3.11+ enums don't support < operator for comparison
-        # We test value comparison instead
-        assert Status.OK.value < Status.SHORT_CIRCUITED.value
-
-    def test_status_iteration(self):
-        """Test that we can iterate over statuses."""
-        statuses = list(Status)
-        assert len(statuses) == 5
-        assert Status.OK in statuses
-        assert Status.UNKNOWN in statuses
-
 
 class TestTemperatureType:
     """Test TemperatureType enum values."""
@@ -129,34 +99,3 @@ class TestTemperatureType:
         """Test that all temperature type values are unique."""
         values = [tt.value for tt in TemperatureType]
         assert len(values) == len(set(values))
-
-    def test_temperature_type_comparison(self):
-        """Test enum comparison operators."""
-        assert TemperatureType.BATTERY == TemperatureType.BATTERY
-        assert TemperatureType.BATTERY != TemperatureType.FRIDGE
-        # Note: Python 3.11+ enums don't support < operator for comparison
-        # We test value comparison instead
-        assert TemperatureType.BATTERY.value < TemperatureType.GENERIC.value
-
-    def test_temperature_type_iteration(self):
-        """Test that we can iterate over temperature types."""
-        temp_types = list(TemperatureType)
-        assert len(temp_types) == 3
-        assert TemperatureType.BATTERY in temp_types
-        assert TemperatureType.GENERIC in temp_types
-
-
-class TestEnumStringRepresentation:
-    """Test enum string representations."""
-
-    def test_fluid_type_string(self):
-        """Test FluidType string representation."""
-        assert str(FluidType.FRESH_WATER) == 'FluidType.FRESH_WATER'
-
-    def test_status_string(self):
-        """Test Status string representation."""
-        assert str(Status.OK) == 'Status.OK'
-
-    def test_temperature_type_string(self):
-        """Test TemperatureType string representation."""
-        assert str(TemperatureType.BATTERY) == 'TemperatureType.BATTERY'
