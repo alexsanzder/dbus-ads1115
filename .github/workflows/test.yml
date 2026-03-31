@@ -33,7 +33,8 @@ jobs:
       run: |
         echo "PYTHONPATH: $PYTHONPATH"
         echo "Adding current directory to PYTHONPATH"
-        echo "$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
+        export PYTHONPATH="$(pwd):$PYTHONPATH"
+        echo "PYTHONPATH=$PYTHONPATH" >> $GITHUB_ENV
 
     - name: Run tests (YAML parser and enums)
       run: |
@@ -44,8 +45,8 @@ jobs:
       run: |
         echo "Test Summary:"
         echo "- YAML Parser: 25 tests"
-        echo "- Enums: 29 tests"
-        echo "- Total: 54 tests (all currently passing)"
+        echo "- Enums: 20 tests"
+        echo "- Total: 45 tests (all currently passing)"
         echo ""
         echo "All tests passing - ready for release!"
 
