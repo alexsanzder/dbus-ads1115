@@ -1,18 +1,59 @@
-#!/bin/sh
-# dbus-ads1115 setup script for SetupHelper/PackageManager
+#!/bin/bash
+source "/data/SetupHelper/HelperResources/IncludeHelpers"
 
-# Source SetupHelper helpers
-source "/data/SetupHelper/HelperResources/forSetupScript"
+# Package-specific variables
+packageName="dbus-ads1115"
+configFile="/etc/modules"
+packageLogFile="/var/log/dbus-ads1115/current"
 
-# Enable standard prompt and automatic actions
-standardPromptAndActions='yes'
+# I2C kernel module setup functions
+insertLines ()
+{
+	if [ $(grep -c "$2" "$1") == 0 ]; then
+		echo "$2" >> "$1"
+		rebootNeeded="$3"
+	fi
+}
 
-# After sourcing, helper resources will handle:
-# - Version compatibility checks
-# - Platform compatibility checks
-# - File installation/uninstallation
-# - Service management
-# - D-Bus settings management
+removeLines ()
+{
+	if [ -f "$1" ]; then
+		if [ $(grep -c "ti-ads1015" "$1") != 0 ]; then
+			sed -i -e '/ti-ads1015/d' "$1"
+			rebootNeeded="$2"
+		fi
+	fi
+}
 
-# End script with automatic actions
-endScript INSTALL_FILES INSTALL_SERVICE ADD_DBUS_SETTINGS
+#### running manually and OK to proceed - prompt for input
+if [ $scriptAction == 'NONE' ] ; then
+	# display initial message
+	echo
+	echo "DBus ADS1115 Tank Sensor Service"
+	
+	standardActionPrompt
+fi
+
+#### install code goes here
+if [ $scriptAction == 'INSTALL' ] ; then
+	logMessage "++ Installing dbus-ads1115 tank sensor service"
+	
+	# Add I2C kernel module
+	insertLines "$configFile" "ti-ads1015" true
+	
+	# Install service
+	installService $packageName
+fi
+
+#### uninstalling - check scriptAction again
+if [ $scriptAction == 'UNINSTALL' ] ; then
+	logMessage "++ Uninstalling dbus-ads1115 tank sensor service"
+	
+	# Remove service
+	removeService $packageName
+	
+	# Remove I2C kernel module entry
+	removeLines "$configFile" true
+fi
+
+endScript

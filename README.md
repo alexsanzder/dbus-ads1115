@@ -18,12 +18,12 @@ To use a resistive sensor (e.g., 0-190Ω), you need a voltage divider circuit:
           |
      [220Ω Fixed Resistor]
           |
-    +-----+------+
-    |            |
-  ADS1115      [Sensor]
-  A0-A3        0-190Ω
-    |            |
-   GND          GND
+     +-----+------+
+     |            |
+   ADS1115      [Sensor]
+   A0-A3        0-190Ω
+     |            |
+    GND          GND
 ```
 
 ## 📥 Installation
@@ -42,50 +42,29 @@ To use a resistive sensor (e.g., 0-190Ω), you need a voltage divider circuit:
    - Enter package info:
      - Owner: `alexsanzder`
      - Repository: `dbus_ads1115`
-     - Branch/Tag: `latest`
+     - Branch/Tag: `main`
    - Click "Add" and the package will be downloaded and installed automatically
 
 2. **Via USB/SD Card:**
-   - Download `venus-data-dbus-ads1115Install.tgz` from the releases page
+   - Download release archive from GitHub releases page
    - Copy to root of freshly formatted USB stick or SD card
    - Insert into GX device and reboot
    - Package will install automatically
 
 3. **Via SSH/Command Line:**
    ```bash
-   wget -qO - https://github.com/alexsanzder/dbus_ads1115/archive/latest.tar.gz | tar -xzf - -C /data
+   wget -qO - https://github.com/alexsanzder/dbus_ads1115/archive/main.tar.gz | tar -xzf - -C /data
    rm -rf /data/dbus-ads1115
-   mv /data/dbus-ads1115-latest /data/dbus-ads1115
+   mv /data/dbus-ads1115-main /data/dbus-ads1115
    /data/dbus-ads1115/setup
    ```
 
 **Configuration:**
-- After installation, edit `/opt/dbus-ads1115/config.yml` to match your resistor values and tank capacity
+- After installation, edit `/data/dbus-ads1115/config.yml` to match your resistor values and tank capacity
 - Restart the service: `sv restart dbus-ads1115`
 
 **Verification:**
 - The sensor should appear in `Settings -> Devices` on your Venus display within 5 minutes
-
-### Method 2: Manual Installation (Legacy)
-
-1. **Download the project:**
-    ```bash
-    mkdir -p /opt/dbus-ads1115
-    cd /opt/dbus-ads1115
-    # (Copy your files here via SFTP or Git)
-    ```
-
-2. **Configure your sensor:**
-    Edit `config.yml` to match your resistor values and tank capacity.
-
-3. **Install the service:**
-    ```bash
-    chmod +x service/*.sh
-    ./service/install.sh
-    ```
-
-4. **Verify:**
-    The sensor should appear in `Settings -> Devices` on your Venus display within 5 minutes.
 
 ### Automatic Reinstallation
 

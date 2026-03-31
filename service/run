@@ -13,5 +13,5 @@ if [ -d /sys/bus/i2c/devices/i2c-1 ]; then
 fi
 
 # Start Python service
-cd /opt/dbus-ads1115
+cd /data/dbus-ads1115
 exec python3 -u -m dbus_ads1115.dbus_ads1115 -c config.yml
