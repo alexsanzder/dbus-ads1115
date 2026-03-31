@@ -1,0 +1,18 @@
+#!/bin/sh
+# dbus-ads1115 setup script for SetupHelper/PackageManager
+
+# Source SetupHelper helpers
+source "/data/SetupHelper/HelperResources/forSetupScript"
+
+# Enable standard prompt and automatic actions
+standardPromptAndActions='yes'
+
+# After sourcing, helper resources will handle:
+# - Version compatibility checks
+# - Platform compatibility checks
+# - File installation/uninstallation
+# - Service management
+# - D-Bus settings management
+
+# End script with automatic actions
+endScript INSTALL_FILES INSTALL_SERVICE ADD_DBUS_SETTINGS

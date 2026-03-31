@@ -1,0 +1,17 @@
+#!/bin/sh
+# dbus-ads1115 service run script
+
+exec 2>&1
+
+# I2C hardware initialization
+if [ -d /sys/bus/i2c/devices/i2c-1 ]; then
+    if [ ! -d /sys/bus/i2c/devices/1-0048 ]; then
+        modprobe ti-ads1015
+        echo ads1015 0x48 > /sys/bus/i2c/devices/i2c-1/new_device
+        sleep 1
+    fi
+fi
+
+# Start Python service
+cd /opt/dbus-ads1115
+exec python3 -u -m dbus_ads1115.dbus_ads1115 -c config.yml

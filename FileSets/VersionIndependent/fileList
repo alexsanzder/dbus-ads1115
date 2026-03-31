@@ -1,0 +1,8 @@
+/opt/dbus-ads1115/config.yml
+/opt/dbus-ads1115/dbus_ads1115/__init__.py
+/opt/dbus-ads1115/dbus_ads1115/dbus_ads1115.py
+/opt/dbus-ads1115/dbus_ads1115/sensors.py
+/opt/dbus-ads1115/dbus_ads1115/enums.py
+/opt/dbus-ads1115/dbus_ads1115/settingsdevice.py
+/opt/dbus-ads1115/dbus_ads1115/ve_utils.py
+/opt/dbus-ads1115/dbus_ads1115/vedbus.py
