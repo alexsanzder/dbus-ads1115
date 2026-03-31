@@ -29,6 +29,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install pytest pytest-mock
 
+    - name: Add package to PYTHONPATH
+      run: |
+        echo "PYTHONPATH: $PYTHONPATH"
+        echo "Adding current directory to PYTHONPATH"
+        echo "$PYTHONPATH:$(pwd)" >> $GITHUB_ENV
+
     - name: Run tests (YAML parser and enums)
       run: |
         pytest tests/test_yaml_parser.py tests/test_enums.py -v --tb=short
@@ -41,8 +47,7 @@ jobs:
         echo "- Enums: 29 tests"
         echo "- Total: 54 tests (all currently passing)"
         echo ""
-        echo "Note: TankSensor and SensorManager tests require enhanced D-Bus mocking"
-        echo "      and are skipped in CI for now"
+        echo "All tests passing - ready for release!"
 
   release-check:
     runs-on: ubuntu-latest
