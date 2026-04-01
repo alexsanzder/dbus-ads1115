@@ -84,9 +84,15 @@ class VeDbusService(object):
                                               do_not_queue=True)
 
         # Add the root item that will return all items as a tree
-        self._dbusnodes['/'] = VeDbusRootExport(self._dbusconn, '/', self)
-
-        logging.info("registered ourselves on D-Bus as %s" % servicename)
+        # Try to create root handler, but handle conflicts gracefully
+        try:
+            self._dbusnodes['/'] = VeDbusRootExport(self._dbusconn, '/', self)
+            logging.info("registered ourselves on D-Bus as %s" % servicename)
+        except KeyError as e:
+            # Root handler already exists for this connection, use alternative approach
+            # This happens when multiple services share the same bus connection
+            logging.warning(f"Root path handler already exists for {servicename}, skipping")
+            logging.info("registered ourselves on D-Bus as %s (without root handler)" % servicename)
 
     def __del__(self):
         """ To force immediate deregistering of this dbus service and all its object paths, explicitly
