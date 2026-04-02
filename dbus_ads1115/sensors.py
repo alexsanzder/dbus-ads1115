@@ -65,6 +65,7 @@ class TankSensor:
         self._config = config
         self._id = next(self._ids)
         self._name = config.get('name')
+        self._product_name = config.get('product_name', 'ADS1115 Tank Sensor')
         logger.info(f"Tank Sensor {self._id}: {self._name or 'Unknown'}")
 
         # Configuration
@@ -156,7 +157,7 @@ class TankSensor:
 
             svc.add_path(f"{base}/DeviceInstance", device_id)
             svc.add_path(f"{base}/ProductId", 0xFFFF)
-            svc.add_path(f"{base}/ProductName", "ADS1115 Tank Sensor")
+            svc.add_path(f"{base}/ProductName", self._product_name)
             svc.add_path(f"{base}/FirmwareVersion", "0.1")
             svc.add_path(f"{base}/HardwareVersion", "1.0")
             svc.add_path(f"{base}/Connected", 1)
@@ -192,7 +193,7 @@ class TankSensor:
 
         svc.add_path('/DeviceInstance', device_id)
         svc.add_path('/ProductId', 0xFFFF)
-        svc.add_path('/ProductName', 'ADS1115 Tank Sensor')
+        svc.add_path('/ProductName', self._product_name)
         svc.add_path('/FirmwareVersion', '0.1')
         svc.add_path('/HardwareVersion', '1.0')
         svc.add_path('/Connected', 1)

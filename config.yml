@@ -5,32 +5,21 @@ i2c:
   reference_voltage: 3.3    # Supply voltage (Raspberry Pi 3.3V)
 
 # Sensors configuration
-# Each sensor: Car Boat Fuel/Water Level Sensor 0-190ohm
-# Wiring: 3.3V -- [220ohm] -- ADC channel -- [sensor] -- GND
-# IMPORTANT: sensor_min = resistance when tank is EMPTY (0.1 ohm = min resistance)
-#            sensor_max = resistance when tank is FULL  (189.9 ohm = max resistance)
-#   - Tank EMPTY (0.1ohm)  -> raw ~12    (0.0015V) -> 0%
-#   - Tank FULL  (189.9ohm)-> raw ~12200 (1.53V)   -> 100%
+# Sensor Model: A5-E225 CLS51012 0-190 26W01
+#   - A5-E225: 5" (225mm long) resistive level sensor
+#   - Range: 0-190Ω
+#   - FULL = 189.8Ω, EMPTY = 0.2Ω
+#
+# Wiring: 3.3V -- [220Ω] -- ADC channel -- [sensor] -- GND
 sensors:
   - type: tank
     name: "Fresh Water Tank"
     channel: 0
     fixed_resistor: 220    # Ohms (pull-up to 3.3V)
     pga: 2.048
-    sensor_min: 0.1        # Ohms (Empty tank = minimum resistance)
-    sensor_max: 189.9      # Ohms (Full tank = maximum resistance)
+    sensor_min: 0.2        # Ohms (Empty tank)
+    sensor_max: 189.8      # Ohms (Full tank)
     tank_capacity: 0.07   # Cubic Meters (0.07 m3 = 70 Liters)
     fluid_type: fresh_water
     update_interval: 5000  # milliseconds
-
-  # Grey Water tank disabled - not connected
-  # - type: tank
-  #   name: "Grey Water Tank"
-  #   channel: 1
-  #   fixed_resistor: 220    # Ohms (pull-up to 3.3V)
-  #   pga: 2.048
-  #   sensor_min: 0.1        # Ohms (Empty tank = minimum resistance)
-  #   sensor_max: 189.9      # Ohms (Full tank = maximum resistance)
-  #   tank_capacity: 0.07   # Cubic Meters (0.07 m3 = 70 Liters)
-  #   fluid_type: waste_water
-  #   update_interval: 5000  # milliseconds
+    product_name: "A5-E225 Tank Sensor (0-190Ω, 225mm)"
