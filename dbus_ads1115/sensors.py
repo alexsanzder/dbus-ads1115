@@ -286,8 +286,11 @@ class TankSensor:
         private_bus = None
         if _dbus_module is not None:
             try:
-                # Create a new private connection to the system bus
-                private_bus = _dbus_module.bus.BusConnection(_dbus_module.bus.BUS_SYSTEM)
+                # Get the system bus address and create a truly private connection
+                # BusConnection(BUS_SYSTEM) returns shared bus, so we need to use the address
+                system_bus = _dbus_module.SystemBus()
+                bus_address = system_bus.get_bus_address()
+                private_bus = _dbus_module.bus.BusConnection(bus_address)
                 logger.info(f"Created private D-Bus connection for {service_name}")
             except Exception as e:
                 logger.warning(f"Could not create private D-Bus connection: {e}, using shared connection")
