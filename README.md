@@ -7,8 +7,8 @@ This service allows you to connect resistive sensors (like water level, fuel, or
 - **Multi-channel support:** Use all 4 channels of the ADS1115.
 - **Smart Calibration:** Easy min/max resistance setup via YAML.
 - **Venus OS Integration:** Appears as a native Tank sensor in the GUI/Remote Console.
-- **Auto-Initialization:** Automatically handles kernel driver loading and I2C device registration.
-- **Zero Dependencies:** Works on clean Venus OS installations without needing `pip` or `PyYAML`.
+- **Direct SMBus Access:** Uses `smbus2` for direct I2C communication — no kernel driver required. Avoids the broken `ti-ads1015` kernel driver which has inverted channel ordering and multiplexing instability.
+- **Auto-installed Dependencies:** `smbus2` is automatically installed by the setup script on every install and firmware-update. No manual steps needed.
 
 ## 🛠 Hardware Setup
 
@@ -144,8 +144,8 @@ For two tank sensors on channels A0 and A1:
    - Select "Add package"
    - Enter package info:
      - Owner: `alexsanzder`
-     - Repository: `dbus_ads1115`
-     - Branch/Tag: `main`
+     - Repository: `dbus-ads1115`
+     - Branch/Tag: `latest`
    - Click "Add" and the package will be downloaded and installed automatically
 
 2. **Via USB/SD Card:**
@@ -156,15 +156,15 @@ For two tank sensors on channels A0 and A1:
 
 3. **Via SSH/Command Line:**
    ```bash
-   wget -qO - https://github.com/alexsanzder/dbus_ads1115/archive/main.tar.gz | tar -xzf - -C /data
+   wget -qO - https://github.com/alexsanzder/dbus-ads1115/archive/latest.tar.gz | tar -xzf - -C /data
    rm -rf /data/dbus-ads1115
-   mv /data/dbus-ads1115-main /data/dbus-ads1115
+   mv /data/dbus-ads1115-latest /data/dbus-ads1115
    /data/dbus-ads1115/setup
    ```
 
 **Configuration:**
 - After installation, edit `/data/dbus-ads1115/config.yml` to match your resistor values and tank capacity
-- Restart the service: `sv restart dbus-ads1115`
+- Restart the service: `svc -t /service/dbus-ads1115`
 
 **Verification:**
 - The sensor should appear in `Settings -> Devices` on your Venus display within 5 minutes
@@ -274,7 +274,7 @@ Available fluid types for Venus OS:
 3. **Fine-tuning:**
    - Check readings in Venus OS
    - Adjust min/max values as needed
-   - Restart service: `sv restart dbus-ads1115`
+   - Restart service: `svc -t /service/dbus-ads1115`
 
 ## 📜 License
 This project is released under the MIT License.

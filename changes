@@ -1,1 +1,9 @@
+v1.4.0 - Fix channel mapping: replace broken ti-ads1015 kernel driver with direct SMBus access via smbus2.
+         Removes IIO sysfs device registration (new_device) entirely; smbus2 uses raw ioctl and needs no kernel binding.
+         Adds rmmod ti_ads1015 + delete_device on startup to prevent driver auto-reload via module alias.
+         Fixes SMBus bus number (was hardcoded to 1, now reads i2c_bus from config).
+         Fixes SMBus channel selection to use iio_channel (respects channel_map).
+         Setup script now installs smbus2 via pip3 on every install/firmware-update.
+         gitHubInfo branch updated to 'latest' for PackageManager compatibility.
+v1.3.0 - Add startup settling period to prevent false alarms on boot
 v1.0.0 - Initial release as SetupHelper package

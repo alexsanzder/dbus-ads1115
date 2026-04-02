@@ -3,27 +3,12 @@ source "/data/SetupHelper/HelperResources/IncludeHelpers"
 
 # Package-specific variables
 packageName="dbus-ads1115"
-configFile="/etc/modules"
 packageLogFile="/var/log/dbus-ads1115/current"
 
-# I2C kernel module setup functions
-insertLines ()
-{
-	if [ $(grep -c "$2" "$1") == 0 ]; then
-		echo "$2" >> "$1"
-		rebootNeeded="$3"
-	fi
-}
-
-removeLines ()
-{
-	if [ -f "$1" ]; then
-		if [ $(grep -c "ti-ads1015" "$1") != 0 ]; then
-			sed -i -e '/ti-ads1015/d' "$1"
-			rebootNeeded="$2"
-		fi
-	fi
-}
+# Note: We do NOT load the ti-ads1015 kernel module.
+# That driver has multiplexing issues (unstable readings when switching channels)
+# and a broken IIO channel ordering on this hardware.
+# The service uses direct SMBus access instead (see service/run).
 
 #### running manually and OK to proceed - prompt for input
 if [ $scriptAction == 'NONE' ] ; then
@@ -37,11 +22,16 @@ fi
 #### install code goes here
 if [ $scriptAction == 'INSTALL' ] ; then
 	logMessage "++ Installing dbus-ads1115 tank sensor service"
-	
-	# Add I2C kernel module
-	insertLines "$configFile" "ti-ads1015" true
-	
-	# Install service
+
+	# Install smbus2 Python library (required for direct SMBus ADC access).
+	# This must run on every install/firmware-update because pip3-installed packages
+	# live on the rootfs and are wiped when Venus OS updates.
+	logMessage "++ Installing smbus2 Python library"
+	pip3 install smbus2 --break-system-packages 2>/dev/null \
+		|| pip3 install smbus2 2>/dev/null \
+		|| logMessage "WARNING: smbus2 install failed - sensor readings will not work"
+
+	# Install service (creates /service/dbus-ads1115 symlink -> /data/dbus-ads1115/service)
 	installService $packageName
 fi
 
@@ -51,9 +41,6 @@ if [ $scriptAction == 'UNINSTALL' ] ; then
 	
 	# Remove service
 	removeService $packageName
-	
-	# Remove I2C kernel module entry
-	removeLines "$configFile" true
 fi
 
 endScript

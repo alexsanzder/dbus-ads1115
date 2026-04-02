@@ -3,14 +3,18 @@
 
 exec 2>&1
 
-# I2C hardware initialization
-if [ -d /sys/bus/i2c/devices/i2c-1 ]; then
-    if [ ! -d /sys/bus/i2c/devices/1-0048 ]; then
-        modprobe ti-ads1015
-        echo ads1015 0x48 > /sys/bus/i2c/devices/i2c-1/new_device
-        sleep 1
-    fi
-fi
+# I2C hardware initialization - do NOT load kernel driver
+# The ti-ads1015 kernel driver has multiplexing issues that cause
+# unstable readings when switching channels, and has a broken IIO channel
+# ordering (in_voltage0_raw maps to AIN1, not AIN0). Use direct SMBus instead.
+#
+# smbus2 opens /dev/i2c-1 directly via ioctl - it does NOT need a sysfs
+# device entry. We only need to ensure the kernel driver is unloaded so
+# it doesn't hold an exclusive lock on the I2C bus.
+rmmod ti_ads1015 2>/dev/null
+# Remove any stale sysfs device entry left by a previous run or the old script.
+# This prevents the kernel from auto-reloading ti_ads1015 via module alias.
+echo 0x48 > /sys/bus/i2c/devices/i2c-1/delete_device 2>/dev/null || true
 
 # Start Python service
 cd /data/dbus-ads1115

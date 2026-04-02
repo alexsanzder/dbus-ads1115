@@ -184,52 +184,104 @@ class TankSensor:
         # Example: scale=1 means 1mV per raw count (PGA=±2.048V for 12-bit)
         self._iio_scale = None  # Will be read on first ADC read
 
-        # Attach to D-Bus. If a shared VeDbusService instance is passed in 'dbus',
-        # create the per-device subtree under that service and use a proxy so the
-        # rest of the code can continue to refer to relative paths like '/Level'.
-        self._ve_service = None
-        self._dbus = self._attach_to_dbus(dbus)
+        # Create a stable device identifier from tank name (not channel!)
+        # This allows moving sensors between channels without losing settings/identity
+        # Sanitize name: lowercase, replace spaces with underscores, remove special chars
+        if self._name:
+            device_identifier = ''.join(
+                c if c.isalnum() or c == '_' else '_' 
+                for c in self._name.lower().replace(' ', '_')
+            ).strip('_')
+            # Remove consecutive underscores
+            while '__' in device_identifier:
+                device_identifier = device_identifier.replace('__', '_')
+        else:
+            device_identifier = f'tank_{self._id}'
+        
+        self._device_identifier = device_identifier
+        logger.info(f"Tank Sensor {self._id}: '{self._name}' -> device identifier '{device_identifier}'")
 
+        # Default DeviceInstance (can be overridden by settings)
+        # Use channel number for DeviceInstance (same as old code)
+        self._device_instance = 20 + self._channel
+
+        # Attach to settings BEFORE creating D-Bus service
+        # This allows reading DeviceInstance from settings
+        self._ve_service = None
+        self._settings_dbus_connection = self._create_dbus_connection()
+        
         # Attach to settings using Venus OS standard paths
-        # Path format: /Settings/Devices/<device_name>/<setting>
+        # Path format: /Settings/Devices/<device_identifier>/<setting>
         # This allows Venus OS GUI to discover and configure the tank
-        device_name = f'ads1115_ch{self._channel}'
         self._settings_base = {
             # Device identification (required for VRM and GUI discovery)
-            'instance': [f'/Settings/Devices/{device_name}/ClassAndVrmInstance', 
-                        f'tank:{self._channel}', '', ''],
+            'instance': [f'/Settings/Devices/{device_identifier}/ClassAndVrmInstance', 
+                        f'tank:{self._device_instance}', '', ''],
+            'device_instance': [f'/Settings/Devices/{device_identifier}/DeviceInstance', 
+                               self._device_instance, 0, 100],
             # Tank configuration
-            'capacity': [f'/Settings/Devices/{device_name}/Capacity', 
+            'capacity': [f'/Settings/Devices/{device_identifier}/Capacity', 
                         float(self._tank_capacity), 0.0, 100000.0],
-            'fluid_type': [f'/Settings/Devices/{device_name}/FluidType', 
+            'fluid_type': [f'/Settings/Devices/{device_identifier}/FluidType', 
                           self._fluid_type.value, 0, 11],
-            'custom_name': [f'/Settings/Devices/{device_name}/CustomName', 
+            'custom_name': [f'/Settings/Devices/{device_identifier}/CustomName', 
                            self._name or '', '', ''],
             # Sensor calibration (voltage-based)
-            'raw_value_empty': [f'/Settings/Devices/{device_name}/RawValueEmpty', 
+            'raw_value_empty': [f'/Settings/Devices/{device_identifier}/RawValueEmpty', 
                                0.0, 0.0, 5.0],
-            'raw_value_full': [f'/Settings/Devices/{device_name}/RawValueFull', 
+            'raw_value_full': [f'/Settings/Devices/{device_identifier}/RawValueFull', 
                               3.3, 0.0, 5.0],
             # Legacy calibration (resistance-based)
-            'scale': [f'/Settings/Devices/{device_name}/Scale', 1.0, 0.0, 10.0],
-            'offset': [f'/Settings/Devices/{device_name}/Offset', 0, 0, ADS1115_RANGE],
+            'scale': [f'/Settings/Devices/{device_identifier}/Scale', 1.0, 0.0, 10.0],
+            'offset': [f'/Settings/Devices/{device_identifier}/Offset', 0, 0, ADS1115_RANGE],
         }
         self._settings = self._attach_to_settings(self._settings_base, self._setting_changed)
+        
+        # Read DeviceInstance from settings (may have been changed by user in GUI)
+        try:
+            stored_instance = self._settings.get('device_instance', self._device_instance)
+            if stored_instance != self._device_instance:
+                logger.info(f"Tank '{self._name}': Using DeviceInstance {stored_instance} from settings (was {self._device_instance})")
+                self._device_instance = stored_instance
+        except Exception as e:
+            logger.warning(f"Could not read DeviceInstance from settings: {e}, using default {self._device_instance}")
+
+        # Now create D-Bus service with correct DeviceInstance
+        self._dbus = self._attach_to_dbus(dbus)
+
+    def _create_dbus_connection(self):
+        """Create a private D-Bus connection for settings access.
+        
+        This is needed before creating the D-Bus service so we can read
+        settings (like DeviceInstance) from the com.victronenergy.settings service.
+        """
+        if _dbus_module is None:
+            return None
+        
+        try:
+            import os
+            bus_address = os.environ.get(
+                "DBUS_SYSTEM_BUS_ADDRESS",
+                "unix:path=/var/run/dbus/system_bus_socket"
+            )
+            return _dbus_module.bus.BusConnection(bus_address)
+        except Exception as e:
+            logger.warning(f"Could not create private D-Bus connection for settings: {e}")
+            return None
 
     def _attach_to_dbus(self, dbus):
         """Attach to D-Bus and create paths.
 
         Venus OS expects each tank to be its own D-Bus service with root-level paths.
         Service name format: com.victronenergy.tank.<identifier>
-        Paths: /Level, /Remaining, /DeviceInstance, etc. (not /deviceXX/Level)
+        Paths: /Level, /Remaining, /DeviceInstance, etc. (not under /deviceXX/Level)
 
         IMPORTANT: Each tank sensor needs its own private D-Bus connection because
         object paths are registered per-connection, not per-service-name. If we share
         the same connection, we can't have multiple services with the same paths (/Level, etc.).
         """
-        # DeviceInstance is based on channel number for deterministic mapping
-        # Channel 0 → DeviceInstance 20, Channel 2 → DeviceInstance 22, etc.
-        device_id = 20 + self._channel
+        # Use DeviceInstance from settings (or default from config position)
+        device_id = self._device_instance
 
         # If caller passed a non-None dbus-like object for tests (Mock), return it directly.
         if dbus is not None and not isinstance(dbus, VeDbusService):
@@ -293,11 +345,8 @@ class TankSensor:
 
         # Create our own dedicated D-Bus service for this tank
         # Venus OS requires each tank to be its own service with root-level paths
-        # DeviceInstance is based on channel number for deterministic mapping
-        device_id = 20 + self._channel
-
-        # Use channel number for deterministic service name
-        base_service_name = f"{TankSensor.dbusBasepath}ads1115_ch{self._channel}"
+        # Use device_identifier for service name (stable, not tied to channel)
+        base_service_name = f"{TankSensor.dbusBasepath}{self._device_identifier}"
         service_name = base_service_name
 
         # If this service name is already used by another sensor in this process,
@@ -511,19 +560,13 @@ class TankSensor:
             self._dbus_set('/Alarms/High/State', self._high_alarm_state)
 
     def _attach_to_settings(self, settings_base, event_callback):
-        # SettingsDevice requires a raw dbus connection. If we are using a
-        # shared VeDbusService, use its dbusconn. Otherwise, the per-service
-        # VeDbusService instance (self._dbus) exposes dbusconn as well. If no
-        # usable bus is available (for example in unit tests), provide a
+        # SettingsDevice requires a raw dbus connection. 
+        # We create a dedicated connection for settings before the D-Bus service.
+        # If no usable bus is available (for example in unit tests), provide a
         # lightweight dummy bus that implements the minimal API used by
         # SettingsDevice so it can initialise without blocking.
-        bus = None
-        if self._ve_service is not None:
-            bus = self._ve_service.dbusconn
-        else:
-            # self._dbus may be a VeDbusService instance in fallback mode
-            bus = getattr(self._dbus, 'dbusconn', None)
-
+        bus = self._settings_dbus_connection
+        
         if bus is None:
             class _DummyProxy:
                 def AddSetting(self, *args, **kwargs):
@@ -607,6 +650,13 @@ class TankSensor:
             # Convert voltage to resistance for internal use
             self._sensor_max = 190.0  # Will be recalculated from voltage
             logger.info(f"Tank {self._id}: Raw value full set to {new_value}V")
+        elif setting == 'device_instance':
+            # DeviceInstance changed in GUI - update D-Bus and internal state
+            if new_value != self._device_instance:
+                logger.info(f"Tank {self._id} ({self._name}): DeviceInstance changed from {self._device_instance} to {new_value}")
+                self._device_instance = int(new_value)
+                # Update D-Bus path - note this doesn't change the service name
+                self._dbus_set('/DeviceInstance', self._device_instance)
         elif setting == 'instance':
             # Instance format is "tank:N" - used for VRM integration
             logger.info(f"Tank {self._id}: Instance set to '{new_value}'")
@@ -692,12 +742,14 @@ class TankSensor:
                 addr = int(addr)
 
             MUX = {0: 0x04, 1: 0x05, 2: 0x06, 3: 0x07}
-            channel = self._channel
+            # Use the mapped channel (iio_channel) so that channel_map applies
+            # consistently whether the sysfs IIO path or SMBus fallback is used.
+            channel = self._iio_channel
             if channel not in MUX:
                 channel = 0
             mux = MUX[channel]
 
-            with SMBus(1) as bus:
+            with SMBus(self._i2c_bus) as bus:
                 # Map PGA value to ADS1115 PGA bits (per datasheet)
                 pga_map = {
                     6.144: 0,
@@ -948,7 +1000,7 @@ class TankSensor:
                 if self._startup_readings_count == self._startup_settling_readings:
                     logger.info(f"Tank {self._id} ({self._name}): Startup settling period complete - alarms now enabled")
 
-            logger.info(f"Tank {self._id} ({self._name}): raw_adc={raw_value}, voltage={voltage:.6f}V, resistance={resistance:.2f}Ω, level={self._level:.1f}%, remaining={self._remaining:.4f}m3")
+            logger.info(f"Tank '{self._name}' [id={self._id}, ch={self._channel}, instance={self._device_instance}]: raw_adc={raw_value}, voltage={voltage:.6f}V, resistance={resistance:.2f}Ω, level={self._level:.1f}%, remaining={self._remaining:.4f}m3")
         except Exception as e:
             logger.error(f"Error in update: {e}")
             self._set_status(Status.UNKNOWN)
