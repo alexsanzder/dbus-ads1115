@@ -10,6 +10,12 @@ This service allows you to connect resistive sensors (like water level, fuel, or
 - **Direct SMBus Access:** Uses `smbus2` for direct I2C communication — no kernel driver required. Avoids the broken `ti-ads1015` kernel driver which has inverted channel ordering and multiplexing instability.
 - **Auto-installed Dependencies:** `smbus2` is automatically installed by the setup script on every install and firmware-update. No manual steps needed.
 
+## 📸 Screenshots
+
+Tank sensors appear as native tank devices in Venus OS:
+
+![Tank level sensors in Venus OS GUI](levels-gui-v2.png)
+
 ## 🛠 Hardware Setup
 
 ### Required Components
