@@ -38,6 +38,25 @@ ADS1115 Module                Raspberry Pi 3B+ Header
    A0-A3        0-190Ω
      |            |
     GND          GND
+
+
+3.3V Rail:
+Pi Pin 1 (3.3V) ----+----[ VDD (ADS1115) ]
+                    |
+                    +----[ RESISTOR 220 Ω ]----+----[ A0 (ADS1115) ]
+                                               |
+                                               +----[ SENSOR (In) ]
+
+GND Rail:
+Pi Pin 6 (GND)  ----+----[ GND  (ADS1115) ]
+                    |
+                    +----[ ADDR (ADS1115) ]
+                    |
+                    +----[ SENSOR (Out) ]
+
+I2C Bus:
+Pi Pin 3 (SDA)  ---------[ SDA  (ADS1115) ]
+Pi Pin 5 (SCL)  ---------[ SCL  (ADS1115) ]
 ```
 
 ## 📥 Installation

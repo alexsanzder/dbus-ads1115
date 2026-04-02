@@ -89,7 +89,7 @@ class TankSensor:
         self._scale = 1.0
         self._offset = 0
 
-        # Build sysfs path (IIO interface)
+        # Build sysfs paths (IIO interface)
         # Normalize address: accept '0x48', '0x49', '72', '73', etc.
         addr = self._i2c_address
         if isinstance(addr, str):
@@ -98,7 +98,15 @@ class TankSensor:
                 addr = addr[2:]  # '0x48' -> '48'
         else:
             addr = str(addr)  # 72 -> '72'
-        self._sysfs_path = f"/sys/bus/i2c/devices/{self._i2c_bus}-00{addr}/iio:device0/in_voltage{self._channel}_raw"
+        
+        iio_base = f"/sys/bus/i2c/devices/{self._i2c_bus}-00{addr}/iio:device0"
+        self._sysfs_path = f"{iio_base}/in_voltage{self._channel}_raw"
+        self._sysfs_scale_path = f"{iio_base}/in_voltage{self._channel}_scale"
+        
+        # Read the kernel driver's scale (mV per LSB) for voltage conversion
+        # The kernel ads1015 driver exposes a scale attribute per channel
+        # Example: scale=1 means 1mV per raw count (PGA=±2.048V for 12-bit)
+        self._iio_scale = None  # Will be read on first ADC read
 
         # Attach to D-Bus. If a shared VeDbusService instance is passed in 'dbus',
         # create the per-device subtree under that service and use a proxy so the
@@ -282,16 +290,32 @@ class TankSensor:
         Uses the kernel's IIO subsystem to read the ADC value. This is required
         when the ads1015 kernel driver is loaded, as it has exclusive access to
         the I2C device. Direct SMBus access would fail with 'Device or resource busy'.
+        
+        Also reads the scale attribute to correctly convert raw values to voltage.
+        The kernel driver exposes scale in mV/LSB (e.g., 1.0 = 1mV per raw count).
         """
         try:
             # Try sysfs IIO interface first (works with kernel driver loaded)
             if hasattr(self, '_sysfs_path') and self._sysfs_path:
                 with open(self._sysfs_path, 'r') as f:
                     raw = int(f.read().strip())
-                    # Handle signed 16-bit values (ADS1115 returns signed values)
-                    if raw >= 32768:
-                        raw -= 65536
-                    return raw
+                
+                # Read the scale from kernel driver (mV per LSB)
+                # This tells us how to convert raw to voltage correctly
+                if self._iio_scale is None and hasattr(self, '_sysfs_scale_path'):
+                    try:
+                        with open(self._sysfs_scale_path, 'r') as f:
+                            # Scale is in mV per LSB, convert to V per LSB
+                            self._iio_scale = float(f.read().strip()) / 1000.0
+                            logger.info(f"IIO scale for channel {self._channel}: {self._iio_scale*1000} mV/LSB ({self._iio_scale} V/LSB)")
+                    except Exception as e:
+                        logger.warning(f"Could not read IIO scale: {e}, using default")
+                        # Default scale for ads1015 with PGA=2.048V, 12-bit: 2.048V/2048 = 0.001V
+                        self._iio_scale = 0.001
+                
+                # Handle signed values (ADS1115 returns signed values)
+                # Note: kernel ads1015 driver treats ADS1115 as 12-bit unsigned
+                return raw
         except FileNotFoundError:
             logger.warning(f"Sysfs path not found: {self._sysfs_path}, falling back to SMBus")
         except Exception as e:
@@ -348,7 +372,19 @@ class TankSensor:
             return None
     
     def _raw_to_voltage(self, raw):
-        # Convert 16-bit signed ADC raw to voltage using sensor's PGA.
+        """Convert raw ADC value to voltage.
+        
+        When using the kernel IIO interface (sysfs), we use the scale attribute
+        from the kernel driver which gives the correct mV/LSB conversion.
+        
+        When using direct SMBus access (fallback), we use the configured PGA value.
+        """
+        # If we have an IIO scale from the kernel driver, use it
+        if hasattr(self, '_iio_scale') and self._iio_scale is not None:
+            return raw * self._iio_scale
+        
+        # Fallback: use configured PGA for direct SMBus access
+        # This assumes 16-bit signed ADC (ADS1115 native format)
         pga = getattr(self, '_pga', ADS1115_PGA)
         return raw * pga / 32767.0
     
