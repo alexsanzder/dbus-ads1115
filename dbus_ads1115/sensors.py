@@ -755,54 +755,68 @@ class TankSensor:
         return V * 32767.0 / pga
 
     def _check_reading_stability(self, resistance):
-        """Check if readings are stable (connected sensor) or unstable (floating/disconnected).
+        """Check if readings indicate a disconnected/floating sensor.
 
-        A connected sensor should have relatively stable resistance readings.
-        A floating/disconnected ADC pin will have highly variable readings due to noise.
+        This check is designed to detect a truly disconnected ADC pin where readings
+        are completely erratic (random noise). It should NOT trigger during normal
+        sensor movement or tank level changes.
 
-        For very low resistance values (near EMPTY), we use absolute standard deviation
-        instead of relative, because small absolute variations cause large relative values.
+        A disconnected sensor shows:
+        - Readings jumping wildly between extremes (not trending)
+        - Values outside the sensor's valid range
+        - Very high relative variance that doesn't settle
 
-        Returns True if stable, False if unstable (likely disconnected).
+        Returns True if stable (connected), False if unstable (likely disconnected).
         """
         # Add to history
         self._resistance_history.append(resistance)
         if len(self._resistance_history) > self._history_size:
             self._resistance_history.pop(0)
 
-        # Need at least 3 readings to check stability
-        if len(self._resistance_history) < 3:
+        # Need at least 5 readings for reliable detection
+        if len(self._resistance_history) < 5:
             return True  # Assume stable until we have enough data
 
-        # Calculate standard deviation
         values = self._resistance_history
+
+        # Check 1: Are any readings completely out of range?
+        # A connected sensor should never read negative or extremely high values
+        for v in values:
+            if v < 0 or v > self._sensor_max * 20:  # Allow some headroom
+                logger.warning(f"Tank {self._id} ({self._name}): Out-of-range reading detected ({v:.2f}Ω)")
+                return False
+
+        # Check 2: Check if readings are "bimodal" (jumping between two extremes)
+        # This indicates a floating pin, not a sensor being moved
+        min_val = min(values)
+        max_val = max(values)
+        range_val = max_val - min_val
         mean = sum(values) / len(values)
-        if mean == 0:
+
+        # If all readings are within a reasonable range, sensor is connected
+        # A floating pin would show readings jumping across the entire ADC range
+        # For our sensor (0-190Ω), a range of <50Ω indicates stable readings
+        MAX_RANGE_FOR_STABLE = 50.0  # Ohms - if readings vary less than this, it's stable
+
+        if range_val < MAX_RANGE_FOR_STABLE:
             return True
 
-        variance = sum((x - mean) ** 2 for x in values) / len(values)
-        std_dev = variance ** 0.5
+        # Check 3: If range is larger, check if readings are trending (legitimate movement)
+        # vs random jumping (disconnected)
+        # Count sign changes in differences - random noise has many sign changes
+        diffs = [values[i+1] - values[i] for i in range(len(values)-1)]
+        sign_changes = sum(1 for i in range(len(diffs)-1) 
+                          if (diffs[i] > 0) != (diffs[i+1] > 0))
 
-        # For very low resistance values, use absolute threshold instead of relative.
-        # This is critical for sensors near EMPTY where resistance is ~0.5-1.0Ω.
-        # Small absolute variations (e.g., ±0.1Ω) would cause huge relative std dev (10-20%).
-        # A truly disconnected/floating sensor will have wildly varying readings (10s-100s of ohms).
-        LOW_RESISTANCE_THRESHOLD = 5.0  # Ohms - below this, use absolute check
-        ABSOLUTE_STD_DEV_THRESHOLD = 2.0  # Ohms - max allowed std dev for low values
+        # If there are many sign changes, readings are erratic (disconnected)
+        # A sensor being moved will trend in one direction
+        MAX_SIGN_CHANGES = len(values) - 2  # Allow one sign change per transition
 
-        if mean < LOW_RESISTANCE_THRESHOLD:
-            # Use absolute standard deviation for low resistance values
-            is_stable = std_dev < ABSOLUTE_STD_DEV_THRESHOLD
-            if not is_stable:
-                logger.debug(f"Tank {self._id} ({self._name}): Unstable readings detected (std_dev={std_dev:.2f}Ω, mean={mean:.2f}Ω, using absolute threshold)")
-        else:
-            # Use relative standard deviation for normal values
-            rel_std_dev = std_dev / mean
-            is_stable = rel_std_dev < self._stability_threshold
-            if not is_stable:
-                logger.debug(f"Tank {self._id} ({self._name}): Unstable readings detected (rel_std_dev={rel_std_dev:.2%}, mean={mean:.2f}Ω)")
+        if sign_changes > MAX_SIGN_CHANGES:
+            logger.warning(f"Tank {self._id} ({self._name}): Erratic readings detected (range={range_val:.1f}Ω, sign_changes={sign_changes})")
+            return False
 
-        return is_stable
+        return True
 
     def calibrate(self, raw_empty, raw_full, pct_empty=0.0, pct_full=100.0, persist=False):
         """Compute scale and offset from two reference raw ADC readings.
