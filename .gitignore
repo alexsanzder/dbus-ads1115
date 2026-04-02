@@ -22,3 +22,5 @@ ENV/
 # Archives (will be created by release process)
 *.tar.gz
 *.tgz
+
+.opencode/

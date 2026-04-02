@@ -5,7 +5,45 @@ from os import _exit as os_exit
 from os import statvfs
 from subprocess import check_output, CalledProcessError
 import logging
-import dbus
+
+# Attempt to import dbus. If it's not available (test environments), provide a
+# minimal stub with the symbols used by this module so unit tests can import
+# without needing the real system dbus package.
+try:
+    import dbus
+except Exception:
+    import types
+
+    class _DummyDBus(types.SimpleNamespace):
+        pass
+
+    dbus = _DummyDBus()
+
+    # Provide basic container/constructor stand-ins used by ve_utils
+    class DummyArray(list):
+        def __init__(self, iterable=(), signature=None, variant_level=None):
+            super().__init__(iterable)
+
+    class DummyDictionary(dict):
+        def __init__(self, mapping=None, signature=None, variant_level=None, **kwargs):
+            if mapping is None:
+                mapping = {}
+            super().__init__(mapping)
+
+    dbus.Array = DummyArray
+    dbus.Dictionary = DummyDictionary
+    dbus.Signature = str
+    dbus.Byte = int
+    dbus.ByteArray = bytes
+    dbus.Double = float
+    dbus.Boolean = bool
+    dbus.Int32 = int
+    dbus.UInt32 = int
+    dbus.Int16 = int
+    dbus.UInt16 = int
+    dbus.Int64 = int
+    dbus.UInt64 = int
+    dbus.String = str
 
 logger = logging.getLogger(__name__)
 

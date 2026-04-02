@@ -1,27 +1,36 @@
-# ADS1115 configuration - Two tanks (Fresh Water + Grey Water)
+# ADS1115 configuration - Single tank (Fresh Water)
 i2c:
   bus: 1
   address: 0x48
-  reference_voltage: 3.3  # Volts
+  reference_voltage: 3.3    # Supply voltage (Raspberry Pi 3.3V)
 
-# Sensors configuration - Two tank setup
+# Sensors configuration
+# Each sensor: Car Boat Fuel/Water Level Sensor 0-190ohm
+# Wiring: 3.3V -- [220ohm] -- ADC channel -- [sensor] -- GND
+# IMPORTANT: sensor_min = resistance when tank is EMPTY (0.1 ohm = min resistance)
+#            sensor_max = resistance when tank is FULL  (189.9 ohm = max resistance)
+#   - Tank EMPTY (0.1ohm)  -> raw ~12    (0.0015V) -> 0%
+#   - Tank FULL  (189.9ohm)-> raw ~12200 (1.53V)   -> 100%
 sensors:
   - type: tank
     name: "Fresh Water Tank"
     channel: 0
-    fixed_resistor: 220    # Ohms (voltage divider)
-    sensor_min: 0.1       # Ohms (Empty - RAW 12)
-    sensor_max: 13.55     # Ohms (Full - RAW 1532)
+    fixed_resistor: 220    # Ohms (pull-up to 3.3V)
+    pga: 2.048
+    sensor_min: 0.1        # Ohms (Empty tank = minimum resistance)
+    sensor_max: 189.9      # Ohms (Full tank = maximum resistance)
     tank_capacity: 0.07   # Cubic Meters (0.07 m3 = 70 Liters)
-    fluid_type: fresh_water  #fresh_water, waste_water, fuel, oil, etc.
+    fluid_type: fresh_water
     update_interval: 5000  # milliseconds
 
-  - type: tank
-    name: "Grey Water Tank"
-    channel: 1
-    fixed_resistor: 220    # Ohms (voltage divider)
-    sensor_min: 0.1       # Ohms (Empty - RAW 12)
-    sensor_max: 13.55     # Ohms (Full - RAW 1532)
-    tank_capacity: 0.07   # Cubic Meters (0.07 m3 = 70 Liters)
-    fluid_type: waste_water  #fresh_water, waste_water, fuel, oil, etc.
-    update_interval: 5000  # milliseconds
+  # Grey Water tank disabled - not connected
+  # - type: tank
+  #   name: "Grey Water Tank"
+  #   channel: 1
+  #   fixed_resistor: 220    # Ohms (pull-up to 3.3V)
+  #   pga: 2.048
+  #   sensor_min: 0.1        # Ohms (Empty tank = minimum resistance)
+  #   sensor_max: 189.9      # Ohms (Full tank = maximum resistance)
+  #   tank_capacity: 0.07   # Cubic Meters (0.07 m3 = 70 Liters)
+  #   fluid_type: waste_water
+  #   update_interval: 5000  # milliseconds

@@ -48,13 +48,78 @@
    The signature of a variant is 'v'.
 """
 
-import dbus.service
 import logging
 import traceback
 import os
 import weakref
 from collections import defaultdict
 import dbus_ads1115.ve_utils
+
+# Attempt to import the real 'dbus' package. If it's not available (for example
+# in unit test environments), provide a minimal stub that exposes the symbols
+# used by this module so imports succeed. The stub does not implement real DBus
+# functionality and is only suitable for tests that mock interactions.
+try:
+    import dbus
+    import dbus.service
+except Exception:
+    import types
+
+    class _DummyServiceModule:
+        class Object:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        @staticmethod
+        def method(*args, **kwargs):
+            def _decorator(f):
+                return f
+
+            return _decorator
+
+        @staticmethod
+        def signal(*args, **kwargs):
+            def _decorator(f):
+                return f
+
+            return _decorator
+
+    dbus = types.SimpleNamespace()
+    dbus.service = _DummyServiceModule()
+
+    # Provide a dummy BusName implementation expected by VeDbusService
+    class _DummyBusName:
+        def __init__(self, name, bus, do_not_queue=False):
+            self._name = name
+
+        def __del__(self):
+            return
+
+    dbus.service.BusName = _DummyBusName
+
+    # Minimal exception container
+    class _Exc:
+        class DBusException(Exception):
+            pass
+
+        class NameExistsException(Exception):
+            pass
+
+    dbus.exceptions = _Exc
+
+    # Minimal container types and helpers used in vedbus
+    dbus.Signature = str
+    dbus.Dictionary = dict
+    dbus.Byte = int
+    dbus.Int64 = int
+
+    # Minimal bus functions / classes
+    def _noop_bus():
+        return None
+
+    dbus.SystemBus = _noop_bus
+    dbus.SessionBus = _noop_bus
+    dbus.bus = types.SimpleNamespace(BusConnection=lambda addr: None, BUS_SYSTEM=0)
 
 
 class VeDbusService(object):
@@ -464,11 +529,20 @@ class VeDbusTreeExport(dbus.service.Object):
         path = self._get_path()
         if path is None:
             return
-        self.remove_from_connection()
+        try:
+            if hasattr(self, 'remove_from_connection'):
+                self.remove_from_connection()
+        except Exception:
+            # Swallow exceptions during interpreter shutdown or when using
+            # minimal dbus stubs that don't implement remove_from_connection.
+            pass
         logging.debug("VeDbusTreeExport %s has been removed" % path)
 
     def _get_path(self):
-        if len(self._locations) == 0:
+        # _locations is provided by dbus.service.Object internals. In test
+        # environments where a minimal stub is used, this attribute may not be
+        # present. Guard against that and return None when unavailable.
+        if not hasattr(self, '_locations') or len(self._locations) == 0:
             return None
         return self._locations[0][1]
 
@@ -569,7 +643,11 @@ class VeDbusItemExport(dbus.service.Object):
         logging.debug("VeDbusItemExport %s has been removed" % path)
 
     def _get_path(self):
-        if len(self._locations) == 0:
+        # In some test environments or during interpreter shutdown the
+        # dbus.service.Object internals (like _locations) may not be present.
+        # Guard against that and return None when unavailable to avoid
+        # unraisable exceptions in __del__.
+        if not hasattr(self, '_locations') or len(self._locations) == 0:
             return None
         return self._locations[0][1]
 

@@ -14,6 +14,20 @@ This service allows you to connect resistive sensors (like water level, fuel, or
 To use a resistive sensor (e.g., 0-190Ω), you need a voltage divider circuit:
 
 ```text
+ADS1115 Module                Raspberry Pi 3B+ Header
+    +----------------+             +---------------------------+
+    |  [VDD] (Red)   |------------>| [Pin 1]  (3.3V Power)     |
+    |  [GND] (Brown) |------------>| [Pin 9]  (Ground)         |
+    |  [SCL] (Yellow)|------------>| [Pin 5]  (I2C SCL)        |
+    |  [SDA] (Blue)  |------------>| [Pin 3]  (I2C SDA)        |
+    |  [ADDR] (Brown)|------------>| [Pin 9]  (Ground)         |
+    |  [ALRT] (Empty)|             +---------------------------+
+    |  [A0] (White)  |
+    |  [A1] (Empty)  |
+    |  [A2] (Empty)  |
+    |  [A3] (Empty)  |
+    +----------------+
+
        +3.3V (Pi Ref)
           |
      [220Ω Fixed Resistor]

@@ -300,7 +300,7 @@ class TestTankSensorUpdate:
     def test_update_updates_dbus(self, mock_dbus, mock_config):
         """Test that D-Bus values are updated."""
         sensor = TankSensor(mock_config, dbus=mock_dbus)
-        mock_dbus_service = Mock()
+        mock_dbus_service = MagicMock()
         sensor._dbus = mock_dbus_service
         
         with patch.object(sensor, '_read_adc_raw', return_value=1000):
@@ -312,7 +312,7 @@ class TestTankSensorUpdate:
     def test_update_rounds_values(self, mock_dbus, mock_config):
         """Test that values are properly rounded."""
         sensor = TankSensor(mock_config, dbus=mock_dbus)
-        mock_dbus_service = Mock()
+        mock_dbus_service = MagicMock()
         sensor._dbus = mock_dbus_service
         
         # Create a scenario that would produce many decimal places
@@ -320,11 +320,11 @@ class TestTankSensorUpdate:
             sensor.update()
         
         # Check that Level is rounded to 1 decimal
-        level_call = call('/Level', pytest.approx(sensor._level, abs=0.01))
+        level_call = call('/Level', round(sensor._level, 1))
         assert level_call in mock_dbus_service.__setitem__.call_args_list
         
         # Check that Remaining is rounded to 4 decimals
-        remaining_call = call('/Remaining', pytest.approx(sensor._remaining, abs=0.0001))
+        remaining_call = call('/Remaining', round(sensor._remaining, 4))
         assert remaining_call in mock_dbus_service.__setitem__.call_args_list
 
 
@@ -383,35 +383,35 @@ class TestTankSensorStatus:
     def test_set_status_ok(self, mock_dbus, mock_config):
         """Test setting OK status."""
         sensor = TankSensor(mock_config, dbus=mock_dbus)
-        mock_dbus_service = Mock()
+        mock_dbus_service = MagicMock()
         sensor._dbus = mock_dbus_service
         
         sensor._set_status(Status.OK)
         
         assert sensor._status == Status.OK
-        assert mock_dbus_service.__setitem__.called_with('/Status', Status.OK.value)
+        mock_dbus_service.__setitem__.assert_called_with('/Status', Status.OK.value)
 
     def test_set_status_disconnected(self, mock_dbus, mock_config):
         """Test setting DISCONNECTED status."""
         sensor = TankSensor(mock_config, dbus=mock_dbus)
-        mock_dbus_service = Mock()
+        mock_dbus_service = MagicMock()
         sensor._dbus = mock_dbus_service
         
         sensor._set_status(Status.DISCONNECTED)
         
         assert sensor._status == Status.DISCONNECTED
-        assert mock_dbus_service.__setitem__.called_with('/Status', Status.DISCONNECTED.value)
+        mock_dbus_service.__setitem__.assert_called_with('/Status', Status.DISCONNECTED.value)
 
     def test_set_status_unknown(self, mock_dbus, mock_config):
         """Test setting UNKNOWN status."""
         sensor = TankSensor(mock_config, dbus=mock_dbus)
-        mock_dbus_service = Mock()
+        mock_dbus_service = MagicMock()
         sensor._dbus = mock_dbus_service
         
         sensor._set_status(Status.UNKNOWN)
         
         assert sensor._status == Status.UNKNOWN
-        assert mock_dbus_service.__setitem__.called_with('/Status', Status.UNKNOWN.value)
+        mock_dbus_service.__setitem__.assert_called_with('/Status', Status.UNKNOWN.value)
 
 
 class TestTankSensorErrorHandling:
@@ -431,12 +431,13 @@ class TestTankSensorErrorHandling:
     def test_update_handles_conversion_error(self, mock_dbus, mock_config):
         """Test that conversion errors are handled gracefully."""
         sensor = TankSensor(mock_config, dbus=mock_dbus)
-        mock_dbus_service = Mock()
+        mock_dbus_service = MagicMock()
         sensor._dbus = mock_dbus_service
         
-        # Mock a conversion that raises an error
-        with patch.object(sensor, '_raw_to_voltage', side_effect=ValueError("Test error")):
-            sensor.update()
+        # Mock _read_adc_raw to return a valid value, then _raw_to_voltage to raise
+        with patch.object(sensor, '_read_adc_raw', return_value=1000):
+            with patch.object(sensor, '_raw_to_voltage', side_effect=ValueError("Test error")):
+                sensor.update()
         
         assert sensor._status == Status.UNKNOWN
 
