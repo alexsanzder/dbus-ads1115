@@ -128,6 +128,11 @@ class TankSensor:
         self._scale = 1.0
         self._offset = 0
 
+        # Startup settling period - don't trigger alarms until readings are stable
+        # This prevents false alerts during boot when sensors take time to initialize
+        self._startup_readings_count = 0
+        self._startup_settling_readings = 5  # Number of readings before enabling alarms
+
         # Level-based alarm state (Venus OS compatible)
         # These are monitored by venus-platform for notifications
         # Read from config if provided, otherwise use defaults
@@ -432,10 +437,14 @@ class TankSensor:
 
         When sensor has a fault (Status != OK), we set low alarm state to 2
         to trigger a sensor fault notification.
+
+        During startup settling period, level-based alarms are not triggered to prevent
+        false alerts while sensors stabilize. Sensor faults are always reported immediately.
         """
-        # If sensor is not OK, trigger a sensor fault alarm
+        # If sensor is not OK, trigger a sensor fault alarm immediately
         # This is done by setting the low alarm state to 2 (Alarm)
         # venus-platform will create a notification for this
+        # Sensor faults bypass the startup settling period
         if self._status != Status.OK:
             new_low_state = 2  # Alarm
             new_high_state = 0  # Clear high alarm when sensor is faulty
@@ -449,6 +458,12 @@ class TankSensor:
                 self._high_alarm_state = new_high_state
                 self._dbus_set('/Alarms/High/State', self._high_alarm_state)
 
+            return
+
+        # During startup settling period, don't trigger level-based alarms
+        # This prevents false alerts when sensors take time to initialize
+        if self._startup_readings_count < self._startup_settling_readings:
+            logger.debug(f"Tank {self._id} ({self._name}): Skipping alarm check during startup settling (reading {self._startup_readings_count + 1}/{self._startup_settling_readings})")
             return
 
         # Sensor is OK - evaluate level-based alarms
@@ -926,6 +941,12 @@ class TankSensor:
             else:
                 # Sensor is OK - update level-based alarms
                 self._update_level_alarms()
+
+            # Increment startup counter after successful reading
+            if self._startup_readings_count < self._startup_settling_readings:
+                self._startup_readings_count += 1
+                if self._startup_readings_count == self._startup_settling_readings:
+                    logger.info(f"Tank {self._id} ({self._name}): Startup settling period complete - alarms now enabled")
 
             logger.info(f"Tank {self._id} ({self._name}): raw_adc={raw_value}, voltage={voltage:.6f}V, resistance={resistance:.2f}Ω, level={self._level:.1f}%, remaining={self._remaining:.4f}m3")
         except Exception as e:
