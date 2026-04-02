@@ -3,7 +3,6 @@ i2c:
   bus: 1
   address: 0x48
   reference_voltage: 3.3    # Supply voltage (Raspberry Pi 3.3V)
-  channel_map: [0, 1, 2, 3]
 
 # Sensors configuration
 # =====================
@@ -17,10 +16,11 @@ i2c:
 #
 # Channel Assignments:
 #   - Channel 0 (A0) → DeviceInstance 20 → Fresh Water Tank
-#   - Channel 2 (A2) → DeviceInstance 22 → Grey Water Tank
+#   - Channel 1 (A1) → DeviceInstance 21 → Grey Water Tank
 #
 sensors:
   # Fresh Water Tank - Channel 0 (A0)
+  # Alarm: Warning when level drops below 20%
   - type: tank
     name: "Fresh Water Tank"
     channel: 0
@@ -32,16 +32,27 @@ sensors:
     fluid_type: fresh_water
     update_interval: 3000  # milliseconds
     product_name: "A5-E225 (0-190Ω, 225mm)"
+    alarms:
+      low:
+        enable: true
+        active: 20         # Alarm when level < 20%
+        restore: 25        # Clear alarm when level > 25%
 
-  # Grey Water Tank - Channel 2 (A2)
+  # Grey Water Tank - Channel 1 (A1)
+  # Alarm: Warning when level rises above 90% (full tank = bad)
   - type: tank
     name: "Grey Water Tank"
-    channel: 2
+    channel: 1
     fixed_resistor: 220    # Ohms (pull-up to 3.3V)
     pga: 2.048
     sensor_min: 0.0        # Ohms (Empty tank)
     sensor_max: 190.0      # Ohms (Full tank)
-    tank_capacity: 0.07    # Cubic Meters (0.07 m3 = 70 Liters) - Adjust as needed
+    tank_capacity: 0.07    # Cubic Meters (0.07 m3 = 70 Liters)
     fluid_type: waste_water
     update_interval: 3000  # milliseconds
     product_name: "A5-E125 (0-190Ω, 125mm)"
+    alarms:
+      high:
+        enable: true
+        active: 90         # Alarm when level > 90%
+        restore: 85        # Clear alarm when level < 85%

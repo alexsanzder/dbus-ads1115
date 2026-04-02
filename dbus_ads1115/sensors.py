@@ -130,17 +130,24 @@ class TankSensor:
 
         # Level-based alarm state (Venus OS compatible)
         # These are monitored by venus-platform for notifications
-        self._low_alarm_enabled = 0      # 0=disabled, 1=enabled
-        self._low_alarm_active = 10      # Level % to trigger alarm
-        self._low_alarm_restore = 15     # Level % to clear alarm
-        self._low_alarm_delay = 30       # Delay in seconds before triggering
+        # Read from config if provided, otherwise use defaults
+        alarms_config = config.get('alarms', {})
+        
+        # Low level alarm configuration
+        low_config = alarms_config.get('low', {})
+        self._low_alarm_enabled = 1 if low_config.get('enable', False) else 0
+        self._low_alarm_active = low_config.get('active', 10)      # Level % to trigger alarm
+        self._low_alarm_restore = low_config.get('restore', 15)   # Level % to clear alarm
+        self._low_alarm_delay = low_config.get('delay', 30)       # Delay in seconds before triggering
         self._low_alarm_state = 0        # Current state: 0=Ok, 1=Warning, 2=Alarm
         self._low_alarm_timer = None     # Timer for delay
 
-        self._high_alarm_enabled = 0     # 0=disabled, 1=enabled
-        self._high_alarm_active = 90     # Level % to trigger alarm
-        self._high_alarm_restore = 80    # Level % to clear alarm
-        self._high_alarm_delay = 5       # Delay in seconds before triggering
+        # High level alarm configuration
+        high_config = alarms_config.get('high', {})
+        self._high_alarm_enabled = 1 if high_config.get('enable', False) else 0
+        self._high_alarm_active = high_config.get('active', 90)     # Level % to trigger alarm
+        self._high_alarm_restore = high_config.get('restore', 80)  # Level % to clear alarm
+        self._high_alarm_delay = high_config.get('delay', 5)       # Delay in seconds before triggering
         self._high_alarm_state = 0       # Current state: 0=Ok, 1=Warning, 2=Alarm
         self._high_alarm_timer = None    # Timer for delay
 
