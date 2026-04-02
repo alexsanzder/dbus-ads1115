@@ -288,8 +288,13 @@ class TankSensor:
             try:
                 # Get the system bus address and create a truly private connection
                 # BusConnection(BUS_SYSTEM) returns shared bus, so we need to use the address
-                system_bus = _dbus_module.SystemBus()
-                bus_address = system_bus.get_bus_address()
+                # Note: get_bus_address() may not exist on all dbus implementations (e.g., Venus OS)
+                # Use environment variable as fallback
+                import os
+                bus_address = os.environ.get(
+                    "DBUS_SYSTEM_BUS_ADDRESS",
+                    "unix:path=/var/run/dbus/system_bus_socket"
+                )
                 private_bus = _dbus_module.bus.BusConnection(bus_address)
                 logger.info(f"Created private D-Bus connection for {service_name}")
             except Exception as e:
