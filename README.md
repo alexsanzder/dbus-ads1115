@@ -11,53 +11,123 @@ This service allows you to connect resistive sensors (like water level, fuel, or
 - **Zero Dependencies:** Works on clean Venus OS installations without needing `pip` or `PyYAML`.
 
 ## 🛠 Hardware Setup
-To use a resistive sensor (e.g., 0-190Ω), you need a voltage divider circuit:
 
-```text
-ADS1115 Module                Raspberry Pi 3B+ Header
-    +----------------+             +---------------------------+
-    |  [VDD] (Red)   |------------>| [Pin 1]  (3.3V Power)     |
-    |  [GND] (Brown) |------------>| [Pin 9]  (Ground)         |
-    |  [SCL] (Yellow)|------------>| [Pin 5]  (I2C SCL)        |
-    |  [SDA] (Blue)  |------------>| [Pin 3]  (I2C SDA)        |
-    |  [ADDR] (Brown)|------------>| [Pin 9]  (Ground)         |
-    |  [ALRT] (Empty)|             +---------------------------+
-    |  [A0] (White)  |
-    |  [A1] (Empty)  |
-    |  [A2] (Empty)  |
-    |  [A3] (Empty)  |
-    +----------------+
+### Required Components
+- ADS1115 16-bit ADC module
+- 220Ω resistor (one per sensor)
+- Resistive level sensor (e.g., 0-190Ω tank sensors)
+- Jumper wires
 
-       +3.3V (Pi Ref)
-          |
-     [220Ω Fixed Resistor]
-          |
-     +-----+------+
-     |            |
-   ADS1115      [Sensor]
-   A0-A3        0-190Ω
-     |            |
-    GND          GND
+### ADS1115 to Raspberry Pi Connection
 
-
-3.3V Rail:
-Pi Pin 1 (3.3V) ----+----[ VDD (ADS1115) ]
-                    |
-                    +----[ RESISTOR 220 Ω ]----+----[ A0 (ADS1115) ]
-                                               |
-                                               +----[ SENSOR (In) ]
-
-GND Rail:
-Pi Pin 6 (GND)  ----+----[ GND  (ADS1115) ]
-                    |
-                    +----[ ADDR (ADS1115) ]
-                    |
-                    +----[ SENSOR (Out) ]
-
-I2C Bus:
-Pi Pin 3 (SDA)  ---------[ SDA  (ADS1115) ]
-Pi Pin 5 (SCL)  ---------[ SCL  (ADS1115) ]
 ```
+ADS1115 Module          Raspberry Pi GPIO Header
+┌─────────────┐         ┌─────────────────────────┐
+│  VDD   (1)  │────────►│ Pin 1  (3.3V Power)     │
+│  GND   (2)  │────────►│ Pin 6  (Ground)         │
+│  SCL   (3)  │────────►│ Pin 5  (I2C SCL, GPIO3) │
+│  SDA   (4)  │────────►│ Pin 3  (I2C SDA, GPIO2) │
+│  ADDR  (5)  │────────►│ Pin 6  (Ground)         │ ← Sets I2C address to 0x48
+│  ALRT  (6)  │         │                         │   (Not used)
+│  A0    (7)  │◄────┐   │                         │
+│  A1    (8)  │◄──┐ │   │                         │
+│  A2    (9)  │   │ │   │                         │
+│  A3   (10)  │   │ │   │                         │
+└─────────────┘   │ │   └─────────────────────────┘
+                  │ │
+          Sensors │ │ (see diagrams below)
+```
+
+### Single Tank Wiring Diagram
+
+For one tank sensor on channel A0:
+
+```
+                    ┌─────────────────────────────────────┐
+                    │           ADS1115 Module            │
+                    │                                     │
+    3.3V ───────────┼─── VDD                              │
+                    │                                     │
+    GND  ───────────┼─── GND                              │
+                    │                                     │
+                    │         ┌─────────────┐             │
+    3.3V ───[220Ω]──┼─────────┤ A0          │             │
+                    │         │             │             │
+                    │         └─────────────┘             │
+                    │              │                      │
+                    │              ▼                      │
+                    │         ╔═════════════╗             │
+                    │         ║   SENSOR    ║   A5-E225   │
+                    │         ║   0-190Ω    ║   (225mm)   │
+                    │         ╚═════╤═══════╝             │
+                    │               │                      │
+    GND  ───────────┼───────────────┘                      │
+                    │                                     │
+                    └─────────────────────────────────────┘
+```
+
+**How it works:**
+- The 220Ω resistor and sensor form a voltage divider
+- As the tank level changes, the sensor resistance changes
+- The ADS1115 measures the voltage at the junction point
+- Software calculates the sensor resistance and tank level
+
+### Dual Tank Wiring Diagram
+
+For two tank sensors on channels A0 and A1:
+
+```
+                    ┌─────────────────────────────────────┐
+                    │           ADS1115 Module            │
+                    │                                     │
+    3.3V ───────────┼─── VDD                              │
+                    │                                     │
+    GND  ───────────┼─── GND                              │
+                    │                                     │
+                    │    ┌─────────────┐                  │
+                    │    │             │                  │
+    3.3V ───[220Ω]──┼────┤ A0          │                  │  FRESH WATER
+                    │    │             │                  │  ────────────
+                    │    └─────────────┘                  │
+                    │         │                           │
+                    │         ▼                           │
+                    │    ╔═════════════╗                  │
+                    │    ║   SENSOR    ║   A5-E225        │
+                    │    ║   0-190Ω    ║   (225mm)        │
+                    │    ╚═════╤═══════╝                  │
+                    │          │                          │
+    GND  ───────────┼──────────┘                          │
+                    │                                     │
+                    │    ┌─────────────┐                  │
+                    │    │             │                  │
+    3.3V ───[220Ω]──┼────┤ A1          │                  │  GREY WATER
+                    │    │             │                  │  ──────────
+                    │    └─────────────┘                  │
+                    │         │                           │
+                    │         ▼                           │
+                    │    ╔═════════════╗                  │
+                    │    ║   SENSOR    ║   A5-E125        │
+                    │    ║   0-190Ω    ║   (125mm)        │
+                    │    ╚═════╤═══════╝                  │
+                    │          │                          │
+    GND  ───────────┼──────────┘                          │
+                    │                                     │
+                    └─────────────────────────────────────┘
+```
+
+**Important Notes:**
+- Each sensor needs its own 220Ω pull-up resistor
+- Each sensor connects to a different ADC channel (A0, A1, A2, or A3)
+- All sensors share the same 3.3V and GND rails
+- Up to 4 tanks can be monitored with a single ADS1115
+
+### Supported Sensor Types
+
+| Model   | Length | Resistance Range | Typical Use      |
+|---------|--------|------------------|------------------|
+| A5-E225 | 225mm  | 0-190Ω           | Fresh water tanks|
+| A5-E125 | 125mm  | 0-190Ω           | Grey water tanks |
+| Custom  | Any    | Any resistive    | Fuel, oil, etc.  |
 
 ## 📥 Installation
 
@@ -104,22 +174,107 @@ Pi Pin 5 (SCL)  ---------[ SCL  (ADS1115) ]
 When using PackageManager/SetupHelper, this package will automatically reinstall after VenusOS firmware updates. No manual intervention required!
 
 ## ⚙️ Configuration (`config.yml`)
+
+### Single Tank Configuration
+
 ```yaml
 i2c:
   bus: 1
-  address: "0x48"
+  address: 0x48
   reference_voltage: 3.3
 
 sensors:
   - type: tank
-    name: "Fresh Water"
-    channel: 0
-    fixed_resistor: 220    # Your fixed resistor value
-    sensor_min: 0.1       # Resistance when empty
-    sensor_max: 13.55     # Resistance when full
-    tank_capacity: 0.07   # Capacity in m3 (0.07 = 70L)
+    name: "Fresh Water Tank"
+    channel: 0                    # ADS1115 channel (0-3)
+    fixed_resistor: 220           # Pull-up resistor in Ohms
+    sensor_min: 0.2               # Resistance when empty
+    sensor_max: 189.8             # Resistance when full
+    tank_capacity: 0.07           # Capacity in m³ (0.07 = 70L)
     fluid_type: fresh_water
+    update_interval: 3000         # Update every 3 seconds
+    product_name: "A5-E225 (0-190Ω, 225mm)"
 ```
+
+### Dual Tank Configuration
+
+```yaml
+i2c:
+  bus: 1
+  address: 0x48
+  reference_voltage: 3.3
+
+sensors:
+  # Fresh Water Tank - Channel A0
+  - type: tank
+    name: "Fresh Water Tank"
+    channel: 0
+    fixed_resistor: 220
+    sensor_min: 0.2
+    sensor_max: 189.8
+    tank_capacity: 0.07           # 70 Liters
+    fluid_type: fresh_water
+    update_interval: 3000
+    product_name: "A5-E225 (0-190Ω, 225mm)"
+
+  # Grey Water Tank - Channel A1
+  - type: tank
+    name: "Grey Water Tank"
+    channel: 1
+    fixed_resistor: 220
+    sensor_min: 0.2
+    sensor_max: 189.8
+    tank_capacity: 0.07           # Adjust to your tank size
+    fluid_type: waste_water
+    update_interval: 3000
+    product_name: "A5-E125 (0-190Ω, 125mm)"
+```
+
+### Configuration Parameters
+
+| Parameter       | Description                                      |
+|-----------------|--------------------------------------------------|
+| `name`          | Display name in Venus OS                         |
+| `channel`       | ADS1115 input channel (0=A0, 1=A1, 2=A2, 3=A3)   |
+| `fixed_resistor`| Pull-up resistor value in Ohms (typically 220Ω)  |
+| `sensor_min`    | Sensor resistance at EMPTY position (Ohms)       |
+| `sensor_max`    | Sensor resistance at FULL position (Ohms)        |
+| `tank_capacity` | Tank capacity in cubic meters (1 m³ = 1000L)     |
+| `fluid_type`    | `fresh_water`, `waste_water`, `fuel`, etc.       |
+| `update_interval`| How often to read sensor (milliseconds)         |
+| `product_name`  | Custom product name shown in device info         |
+
+### Fluid Types
+
+Available fluid types for Venus OS:
+- `fresh_water` - Fresh/potable water
+- `waste_water` - Grey water
+- `fuel` - Diesel/gasoline
+- `oil` - Motor oil
+- `live_well` - Live well (fishing boats)
+- `black_water` - Sewage
+- `gasoline` - Gasoline fuel
+- `diesel` - Diesel fuel
+- `lng` - Liquefied Natural Gas
+- `lpg` - Liquefied Petroleum Gas
+- `hydraulic_oil` - Hydraulic oil
+
+## 🔧 Calibration
+
+1. **Empty Tank Calibration:**
+   - Disconnect sensor wire from ADC
+   - Measure sensor resistance with multimeter
+   - Set `sensor_min` to this value
+
+2. **Full Tank Calibration:**
+   - Fill tank to known level (100%)
+   - Measure sensor resistance
+   - Set `sensor_max` to this value
+
+3. **Fine-tuning:**
+   - Check readings in Venus OS
+   - Adjust min/max values as needed
+   - Restart service: `sv restart dbus-ads1115`
 
 ## 📜 License
 This project is released under the MIT License.

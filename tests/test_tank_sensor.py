@@ -389,7 +389,11 @@ class TestTankSensorStatus:
         sensor._set_status(Status.OK)
         
         assert sensor._status == Status.OK
-        mock_dbus_service.__setitem__.assert_called_with('/Status', Status.OK.value)
+        # _set_status now calls multiple D-Bus updates: /Status, /Alarm, and alarm states
+        # Check that /Status was set (may not be the last call)
+        mock_dbus_service.__setitem__.assert_any_call('/Status', Status.OK.value)
+        # Check that alarm was cleared for OK status
+        mock_dbus_service.__setitem__.assert_any_call('/Alarm', 0)
 
     def test_set_status_disconnected(self, mock_dbus, mock_config):
         """Test setting DISCONNECTED status."""
@@ -400,7 +404,12 @@ class TestTankSensorStatus:
         sensor._set_status(Status.DISCONNECTED)
         
         assert sensor._status == Status.DISCONNECTED
-        mock_dbus_service.__setitem__.assert_called_with('/Status', Status.DISCONNECTED.value)
+        # _set_status now calls multiple D-Bus updates: /Status, /Alarm, and alarm states
+        mock_dbus_service.__setitem__.assert_any_call('/Status', Status.DISCONNECTED.value)
+        # Disconnected status should set alarm
+        mock_dbus_service.__setitem__.assert_any_call('/Alarm', 2)
+        # And trigger low level alarm for sensor fault
+        mock_dbus_service.__setitem__.assert_any_call('/Alarms/Low/State', 2)
 
     def test_set_status_unknown(self, mock_dbus, mock_config):
         """Test setting UNKNOWN status."""
@@ -411,7 +420,10 @@ class TestTankSensorStatus:
         sensor._set_status(Status.UNKNOWN)
         
         assert sensor._status == Status.UNKNOWN
-        mock_dbus_service.__setitem__.assert_called_with('/Status', Status.UNKNOWN.value)
+        # _set_status now calls multiple D-Bus updates
+        mock_dbus_service.__setitem__.assert_any_call('/Status', Status.UNKNOWN.value)
+        # Unknown status should set warning alarm
+        mock_dbus_service.__setitem__.assert_any_call('/Alarm', 1)
 
 
 class TestTankSensorErrorHandling:

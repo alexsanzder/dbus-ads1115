@@ -134,6 +134,8 @@ class SensorManager:
             cfg['i2c_bus'] = cfg.get('i2c_bus', i2c_cfg.get('bus', 1))
             cfg['i2c_address'] = cfg.get('i2c_address', i2c_cfg.get('address', '0x48'))
             cfg['reference_voltage'] = i2c_cfg.get('reference_voltage', 3.3)
+            # Pass channel_map from i2c config to sensor
+            cfg['channel_map'] = i2c_cfg.get('channel_map', [0, 1, 2, 3])
 
             if cfg.get('type') == 'tank':
                 # Each sensor creates its own D-Bus service (dbus=None means create new service)
