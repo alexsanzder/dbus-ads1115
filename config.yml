@@ -3,8 +3,6 @@ i2c:
   bus: 1
   address: 0x48
   reference_voltage: 3.3    # Supply voltage (Raspberry Pi 3.3V)
-  # Channel mapping: maps logical channel (A0, A1, A2, A3) to physical channel
-  # Default: [0, 1, 2, 3] (identity mapping - A0 reads A0, A1 reads A1, etc.)
   channel_map: [0, 1, 2, 3]
 
 # Sensors configuration
@@ -13,9 +11,9 @@ i2c:
 #   Wiring: 3.3V -- [220Ω] -- ADC channel -- [sensor] -- GND
 #
 # Sensor Models:
-#   - A5-E225: 5" (225mm long) resistive level sensor, Range: 0-190Ω
+#   - A5-E225: 225mm long resistive level sensor, Range: 0-190Ω
 #   - A5-E125: 125mm long resistive level sensor, Range: 0-190Ω
-#   - FULL = 189.8Ω, EMPTY = 0.2Ω (both models use same range)
+#   - FULL = 190Ω, EMPTY = 0.0Ω (both models use same range)
 #
 # Channel Assignments:
 #   - Channel 0 (A0) → DeviceInstance 20 → Fresh Water Tank
@@ -28,8 +26,8 @@ sensors:
     channel: 0
     fixed_resistor: 220    # Ohms (pull-up to 3.3V)
     pga: 2.048
-    sensor_min: 0.2        # Ohms (Empty tank)
-    sensor_max: 189.8      # Ohms (Full tank)
+    sensor_min: 0.0        # Ohms (Empty tank)
+    sensor_max: 190.0      # Ohms (Full tank)
     tank_capacity: 0.07    # Cubic Meters (0.07 m3 = 70 Liters)
     fluid_type: fresh_water
     update_interval: 3000  # milliseconds
@@ -41,8 +39,8 @@ sensors:
     channel: 2
     fixed_resistor: 220    # Ohms (pull-up to 3.3V)
     pga: 2.048
-    sensor_min: 0.2        # Ohms (Empty tank)
-    sensor_max: 189.8      # Ohms (Full tank)
+    sensor_min: 0.0        # Ohms (Empty tank)
+    sensor_max: 190.0      # Ohms (Full tank)
     tank_capacity: 0.07    # Cubic Meters (0.07 m3 = 70 Liters) - Adjust as needed
     fluid_type: waste_water
     update_interval: 3000  # milliseconds

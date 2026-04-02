@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  update-latest-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Update latest tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Delete old latest tag if exists
+          git push --delete origin latest 2>/dev/null || true
+          
+          # Create new latest tag pointing to current release
+          git tag latest -f
+          git push origin latest -f
+          
+          echo "Updated 'latest' tag to point to release ${{ github.event.release.tag_name }}"
+
+      - name: Summary
+        run: |
+          echo "✅ 'latest' tag updated to: ${{ github.event.release.tag_name }}"
+          echo "📦 Users can now install with:"
+          echo "   pip install git+https://github.com/alexsanzder/dbus-ads1115.git@latest"
