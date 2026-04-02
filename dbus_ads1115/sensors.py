@@ -185,13 +185,29 @@ class TankSensor:
         self._ve_service = None
         self._dbus = self._attach_to_dbus(dbus)
 
-        # Attach to settings
-        # DeviceInstance is based on channel number for deterministic mapping
-        # Channel 0 → DeviceInstance 20, Channel 2 → DeviceInstance 22, etc.
-        device_id = 20 + self._channel
+        # Attach to settings using Venus OS standard paths
+        # Path format: /Settings/Devices/<device_name>/<setting>
+        # This allows Venus OS GUI to discover and configure the tank
+        device_name = f'ads1115_ch{self._channel}'
         self._settings_base = {
-            'scale': [f'/Settings/Devices/device0_{device_id}/Scale', 1.0, 0.0, 1.0],
-            'offset': [f'/Settings/Devices/device0_{device_id}/Offset', 0, 0, ADS1115_RANGE]
+            # Device identification (required for VRM and GUI discovery)
+            'instance': [f'/Settings/Devices/{device_name}/ClassAndVrmInstance', 
+                        f'tank:{self._channel}', '', ''],
+            # Tank configuration
+            'capacity': [f'/Settings/Devices/{device_name}/Capacity', 
+                        float(self._tank_capacity), 0.0, 100000.0],
+            'fluid_type': [f'/Settings/Devices/{device_name}/FluidType', 
+                          self._fluid_type.value, 0, 11],
+            'custom_name': [f'/Settings/Devices/{device_name}/CustomName', 
+                           self._name or '', '', ''],
+            # Sensor calibration (voltage-based)
+            'raw_value_empty': [f'/Settings/Devices/{device_name}/RawValueEmpty', 
+                               0.0, 0.0, 5.0],
+            'raw_value_full': [f'/Settings/Devices/{device_name}/RawValueFull', 
+                              3.3, 0.0, 5.0],
+            # Legacy calibration (resistance-based)
+            'scale': [f'/Settings/Devices/{device_name}/Scale', 1.0, 0.0, 10.0],
+            'offset': [f'/Settings/Devices/{device_name}/Offset', 0, 0, ADS1115_RANGE],
         }
         self._settings = self._attach_to_settings(self._settings_base, self._setting_changed)
 
@@ -532,19 +548,53 @@ class TankSensor:
         return SettingsDevice(bus, settings_base, event_callback)
 
     def _setting_changed(self, setting, *args):
+        """Handle setting changes from Venus OS GUI or other sources.
+        
+        This callback is triggered when any setting changes via the
+        com.victronenergy.settings D-Bus service. Changes are synced
+        to the tank service D-Bus paths.
+        """
         # Accept either signature: (setting, new) or (setting, old, new)
         if len(args) == 1:
             new_value = args[0]
         elif len(args) >= 2:
             new_value = args[1]
         else:
-            # No value provided
             return
+
+        logger.info(f"Tank {self._id} ({self._name}): Setting '{setting}' changed to {new_value}")
 
         if setting == 'scale':
             self._scale = new_value
         elif setting == 'offset':
             self._offset = new_value
+        elif setting == 'capacity':
+            self._tank_capacity = new_value
+            self._dbus_set('/Capacity', float(new_value))
+            # Recalculate remaining
+            self._remaining = (self._level / 100.0) * self._tank_capacity
+            self._dbus_set('/Remaining', float(round(self._remaining, 4)))
+        elif setting == 'fluid_type':
+            self._fluid_type = FluidType(new_value)
+            self._dbus_set('/FluidType', self._fluid_type.value)
+            logger.info(f"Tank {self._id}: Fluid type changed to {self._fluid_type.name}")
+        elif setting == 'custom_name':
+            # Update the name (though D-Bus doesn't have a /Name path, this is for internal use)
+            self._name = new_value
+            logger.info(f"Tank {self._id}: Custom name changed to '{new_value}'")
+        elif setting == 'raw_value_empty':
+            # Update sensor calibration - voltage at empty
+            # Convert voltage to resistance for internal use
+            self._sensor_min = 0.0  # Will be recalculated from voltage
+            logger.info(f"Tank {self._id}: Raw value empty set to {new_value}V")
+        elif setting == 'raw_value_full':
+            # Update sensor calibration - voltage at full
+            # Convert voltage to resistance for internal use
+            self._sensor_max = 190.0  # Will be recalculated from voltage
+            logger.info(f"Tank {self._id}: Raw value full set to {new_value}V")
+        elif setting == 'instance':
+            # Instance format is "tank:N" - used for VRM integration
+            logger.info(f"Tank {self._id}: Instance set to '{new_value}'")
 
     def _set_status(self, status):
         """Update sensor status and trigger alarm updates.
