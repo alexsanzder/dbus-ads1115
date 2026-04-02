@@ -1,3 +1,4 @@
+v1.4.1 - Add screenshot of tank levels in Venus OS GUI to README.
 v1.4.0 - Fix channel mapping: replace broken ti-ads1015 kernel driver with direct SMBus access via smbus2.
          Removes IIO sysfs device registration (new_device) entirely; smbus2 uses raw ioctl and needs no kernel binding.
          Adds rmmod ti_ads1015 + delete_device on startup to prevent driver auto-reload via module alias.
