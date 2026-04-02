@@ -760,6 +760,9 @@ class TankSensor:
         A connected sensor should have relatively stable resistance readings.
         A floating/disconnected ADC pin will have highly variable readings due to noise.
 
+        For very low resistance values (near EMPTY), we use absolute standard deviation
+        instead of relative, because small absolute variations cause large relative values.
+
         Returns True if stable, False if unstable (likely disconnected).
         """
         # Add to history
@@ -771,7 +774,7 @@ class TankSensor:
         if len(self._resistance_history) < 3:
             return True  # Assume stable until we have enough data
 
-        # Calculate coefficient of variation (relative standard deviation)
+        # Calculate standard deviation
         values = self._resistance_history
         mean = sum(values) / len(values)
         if mean == 0:
@@ -779,13 +782,25 @@ class TankSensor:
 
         variance = sum((x - mean) ** 2 for x in values) / len(values)
         std_dev = variance ** 0.5
-        rel_std_dev = std_dev / mean
 
-        # If relative standard deviation is high, readings are unstable
-        is_stable = rel_std_dev < self._stability_threshold
+        # For very low resistance values, use absolute threshold instead of relative.
+        # This is critical for sensors near EMPTY where resistance is ~0.5-1.0Ω.
+        # Small absolute variations (e.g., ±0.1Ω) would cause huge relative std dev (10-20%).
+        # A truly disconnected/floating sensor will have wildly varying readings (10s-100s of ohms).
+        LOW_RESISTANCE_THRESHOLD = 5.0  # Ohms - below this, use absolute check
+        ABSOLUTE_STD_DEV_THRESHOLD = 2.0  # Ohms - max allowed std dev for low values
 
-        if not is_stable:
-            logger.debug(f"Tank {self._id} ({self._name}): Unstable readings detected (rel_std_dev={rel_std_dev:.2%}, mean={mean:.2f}Ω)")
+        if mean < LOW_RESISTANCE_THRESHOLD:
+            # Use absolute standard deviation for low resistance values
+            is_stable = std_dev < ABSOLUTE_STD_DEV_THRESHOLD
+            if not is_stable:
+                logger.debug(f"Tank {self._id} ({self._name}): Unstable readings detected (std_dev={std_dev:.2f}Ω, mean={mean:.2f}Ω, using absolute threshold)")
+        else:
+            # Use relative standard deviation for normal values
+            rel_std_dev = std_dev / mean
+            is_stable = rel_std_dev < self._stability_threshold
+            if not is_stable:
+                logger.debug(f"Tank {self._id} ({self._name}): Unstable readings detected (rel_std_dev={rel_std_dev:.2%}, mean={mean:.2f}Ω)")
 
         return is_stable
 
