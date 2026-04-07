@@ -33,7 +33,7 @@ ADS1115 Module          Raspberry Pi GPIO Header
 │  GND   (2)  │────────►│ Pin 9  (Ground)         │
 │  SCL   (3)  │────────►│ Pin 5  (I2C SCL, GPIO3) │
 │  SDA   (4)  │────────►│ Pin 3  (I2C SDA, GPIO2) │
-│  ADDR  (5)  │────────►│ Pin 9  (Ground)         │ ← Sets I2C address to 0x48
+│  ADDR  (5)  │────────►│ Pin 9  (Ground)         │ ← I2C address to 0x48
 │  ALRT  (6)  │          │                         │
 │  A0    (7)  │◄────┐   │                         │
 │  A1    (8)  │◄──┐ │   │                         │
@@ -191,6 +191,7 @@ i2c:
 
 sensors:
   - type: tank
+    enabled: true                 # Set to false to disable this sensor
     name: "Fresh Water Tank"
     channel: 0                    # ADS1115 channel (0-3)
     fixed_resistor: 220           # Pull-up resistor in Ohms
@@ -200,6 +201,7 @@ sensors:
     fluid_type: fresh_water
     update_interval: 3000         # Update every 3 seconds
     product_name: "A5-E225 (0-190Ω, 225mm)"
+    product_id: 0xA5225           # Numeric product ID for VRM Portal (hex or int)
 ```
 
 ### Dual Tank Configuration
@@ -213,6 +215,7 @@ i2c:
 sensors:
   # Fresh Water Tank - Channel A0
   - type: tank
+    enabled: true
     name: "Fresh Water Tank"
     channel: 0
     fixed_resistor: 220
@@ -222,9 +225,11 @@ sensors:
     fluid_type: fresh_water
     update_interval: 3000
     product_name: "A5-E225 (0-190Ω, 225mm)"
+    product_id: 0xA5225
 
   # Grey Water Tank - Channel A1
   - type: tank
+    enabled: false                # Set to true when sensor is wired
     name: "Grey Water Tank"
     channel: 1
     fixed_resistor: 220
@@ -234,21 +239,54 @@ sensors:
     fluid_type: waste_water
     update_interval: 3000
     product_name: "A5-E125 (0-190Ω, 125mm)"
+    product_id: 0xA5125
 ```
 
 ### Configuration Parameters
 
 | Parameter       | Description                                      |
 |-----------------|--------------------------------------------------|
+| `enabled`       | Set to `false` to disable a sensor (no D-Bus service, no ADC read) |
 | `name`          | Display name in Venus OS                         |
 | `channel`       | ADS1115 input channel (0=A0, 1=A1, 2=A2, 3=A3)   |
 | `fixed_resistor`| Pull-up resistor value in Ohms (typically 220Ω)  |
+| `pga`           | Programmable Gain Amplifier voltage range (default 2.048V) |
 | `sensor_min`    | Sensor resistance at EMPTY position (Ohms)       |
-| `sensor_max`    | Sensor resistance at FULL position (Ohms)        |
+| `sensor_max`    | Sensor resistance at FULL position (Ohms)         |
 | `tank_capacity` | Tank capacity in cubic meters (1 m³ = 1000L)     |
 | `fluid_type`    | `fresh_water`, `waste_water`, `fuel`, etc.       |
 | `update_interval`| How often to read sensor (milliseconds)         |
 | `product_name`  | Custom product name shown in device info         |
+| `product_id`   | Numeric product ID for VRM Portal (hex or int, e.g. `0xA5225`) |
+
+### Per-Sensor Alarms (Optional)
+
+Each sensor can define low and high level alarms:
+
+```yaml
+sensors:
+  - type: tank
+    name: "Fresh Water Tank"
+    # ... other config ...
+    alarms:
+      low:
+        enable: true
+        active: 20         # Trigger alarm when level < 20%
+        restore: 25       # Clear alarm when level > 25%
+        delay: 30         # Delay in seconds before triggering
+      high:
+        enable: true
+        active: 90         # Trigger alarm when level > 90%
+        restore: 85       # Clear alarm when level < 85%
+        delay: 5
+```
+
+| Alarm Parameter | Description |
+|-----------------|-------------|
+| `enable`        | Set to `true` to enable the alarm |
+| `active`        | Level percentage that triggers the alarm |
+| `restore`       | Level percentage that clears the alarm |
+| `delay`         | Seconds to wait before triggering (prevents flapping) |
 
 ### Fluid Types
 
