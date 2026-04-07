@@ -328,6 +328,121 @@ sensors:
             os.unlink(path)
 
 
+class TestSensorManagerEnabledFlag:
+    """Test that the `enabled` flag controls whether a sensor is instantiated."""
+
+    def test_disabled_sensor_is_skipped(self):
+        """A sensor with enabled: false must NOT appear in _sensors."""
+        from dbus_ads1115.dbus_ads1115 import SensorManager
+
+        config_content = """
+i2c:
+  bus: 1
+  address: "0x48"
+  reference_voltage: 3.3
+
+sensors:
+  - type: tank
+    name: "Active Tank"
+    enabled: true
+    channel: 0
+    fixed_resistor: 220
+    sensor_min: 0.1
+    sensor_max: 13.55
+    tank_capacity: 0.07
+    fluid_type: fresh_water
+  - type: tank
+    name: "Inactive Tank"
+    enabled: false
+    channel: 1
+    fixed_resistor: 220
+    sensor_min: 0.1
+    sensor_max: 13.55
+    tank_capacity: 0.07
+    fluid_type: waste_water
+"""
+        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
+        with os.fdopen(fd, 'w') as f:
+            f.write(config_content)
+
+        try:
+            manager = SensorManager(path)
+            assert len(manager._sensors) == 1
+            assert manager._sensors[0]._name == "Active Tank"
+        finally:
+            os.unlink(path)
+
+    def test_sensor_enabled_by_default(self):
+        """A sensor without the enabled key must be instantiated (default True)."""
+        from dbus_ads1115.dbus_ads1115 import SensorManager
+
+        config_content = """
+i2c:
+  bus: 1
+  address: "0x48"
+  reference_voltage: 3.3
+
+sensors:
+  - type: tank
+    name: "Default Tank"
+    channel: 0
+    fixed_resistor: 220
+    sensor_min: 0.1
+    sensor_max: 13.55
+    tank_capacity: 0.07
+    fluid_type: fresh_water
+"""
+        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
+        with os.fdopen(fd, 'w') as f:
+            f.write(config_content)
+
+        try:
+            manager = SensorManager(path)
+            assert len(manager._sensors) == 1
+        finally:
+            os.unlink(path)
+
+    def test_all_disabled_produces_empty_sensor_list(self):
+        """All sensors disabled must yield zero running sensors."""
+        from dbus_ads1115.dbus_ads1115 import SensorManager
+
+        config_content = """
+i2c:
+  bus: 1
+  address: "0x48"
+  reference_voltage: 3.3
+
+sensors:
+  - type: tank
+    name: "Tank A"
+    enabled: false
+    channel: 0
+    fixed_resistor: 220
+    sensor_min: 0.1
+    sensor_max: 13.55
+    tank_capacity: 0.07
+    fluid_type: fresh_water
+  - type: tank
+    name: "Tank B"
+    enabled: false
+    channel: 1
+    fixed_resistor: 220
+    sensor_min: 0.1
+    sensor_max: 13.55
+    tank_capacity: 0.07
+    fluid_type: waste_water
+"""
+        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
+        with os.fdopen(fd, 'w') as f:
+            f.write(config_content)
+
+        try:
+            manager = SensorManager(path)
+            assert len(manager._sensors) == 0
+        finally:
+            os.unlink(path)
+
+
 class TestSensorManagerUpdate:
     """Test update method."""
 

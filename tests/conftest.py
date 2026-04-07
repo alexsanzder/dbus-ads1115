@@ -20,7 +20,8 @@ def mock_config():
         'fluid_type': 'fresh_water',
         'i2c_bus': 1,
         'i2c_address': '0x48',
-        'reference_voltage': 3.3
+        'reference_voltage': 3.3,
+        'product_id': 0xA5225,  # Configurable product ID for VRM Portal
     }
 
 

@@ -28,18 +28,18 @@ Tank sensors appear as native tank devices in Venus OS:
 
 ```
 ADS1115 Module          Raspberry Pi GPIO Header
-┌─────────────┐         ┌─────────────────────────┐
+┌────────────┐         ┌─────────────────────────┐
 │  VDD   (1)  │────────►│ Pin 1  (3.3V Power)     │
-│  GND   (2)  │────────►│ Pin 6  (Ground)         │
+│  GND   (2)  │────────►│ Pin 9  (Ground)         │
 │  SCL   (3)  │────────►│ Pin 5  (I2C SCL, GPIO3) │
 │  SDA   (4)  │────────►│ Pin 3  (I2C SDA, GPIO2) │
-│  ADDR  (5)  │────────►│ Pin 6  (Ground)         │ ← Sets I2C address to 0x48
-│  ALRT  (6)  │         │                         │   (Not used)
+│  ADDR  (5)  │────────►│ Pin 9  (Ground)         │ ← Sets I2C address to 0x48
+│  ALRT  (6)  │          │                         │
 │  A0    (7)  │◄────┐   │                         │
 │  A1    (8)  │◄──┐ │   │                         │
 │  A2    (9)  │   │ │   │                         │
 │  A3   (10)  │   │ │   │                         │
-└─────────────┘   │ │   └─────────────────────────┘
+└────────────┘   │ │  └─────────────────────────┘
                   │ │
           Sensors │ │ (see diagrams below)
 ```

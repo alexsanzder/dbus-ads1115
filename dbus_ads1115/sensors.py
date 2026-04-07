@@ -14,6 +14,13 @@ try:
 except ImportError:
     _dbus_module = None
 
+# Package version – used in mandatory D-Bus metadata paths so that VRM Portal
+# and the Venus OS GUI display the correct firmware string.
+try:
+    from dbus_ads1115 import __version__ as _PACKAGE_VERSION
+except ImportError:
+    _PACKAGE_VERSION = '0.0.0'  # Safety fallback – should never be reached in a proper install
+
 logger = logging.getLogger(__name__)
 
 # ADC full-scale constants. Keep default PGA at 4.096V to match historical
@@ -82,6 +89,17 @@ class TankSensor:
         self._id = next(self._ids)
         self._name = config.get('name')
         self._product_name = config.get('product_name', 'ADS1115 Tank Sensor')
+
+        # ProductId: numeric Victron product identifier shown in VRM Portal.
+        # Accepts an integer (0xA522) or a hex string ('0xA522') in config.
+        # Defaults to 0xFFFF (generic / unknown) when not specified.
+        _pid = config.get('product_id', 0xFFFF)
+        if isinstance(_pid, str):
+            _pid = _pid.strip()
+            self._product_id = int(_pid, 16) if _pid.lower().startswith('0x') else int(_pid)
+        else:
+            self._product_id = int(_pid)
+
         logger.info(f"Tank Sensor {self._id}: {self._name or 'Unknown'}")
 
         # Configuration
@@ -320,15 +338,17 @@ class TankSensor:
             svc.add_path(f"{base}/Alarm", self._alarm, writeable=False)
 
             svc.add_path(f"{base}/Mgmt/ProcessName", "dbus-ads1115")
-            svc.add_path(f"{base}/Mgmt/ProcessVersion", "0.1")
+            svc.add_path(f"{base}/Mgmt/ProcessVersion", _PACKAGE_VERSION)
             svc.add_path(f"{base}/Mgmt/Connection", "ADS1115")
 
             svc.add_path(f"{base}/DeviceInstance", device_id)
-            svc.add_path(f"{base}/ProductId", 0xFFFF)
+            svc.add_path(f"{base}/ProductId", self._product_id)
             svc.add_path(f"{base}/ProductName", self._product_name)
-            svc.add_path(f"{base}/FirmwareVersion", "0.1")
+            svc.add_path(f"{base}/FirmwareVersion", _PACKAGE_VERSION)
             svc.add_path(f"{base}/HardwareVersion", "1.0")
             svc.add_path(f"{base}/Connected", 1)
+            svc.add_path(f"{base}/CustomName", self._name or '', writeable=True,
+                         onchangecallback=self._handle_dbus_change)
 
             paths = {
                 'Level': f"{base}/Level",
@@ -409,17 +429,25 @@ class TankSensor:
         self._alarm = 0
         svc.add_path('/Alarm', self._alarm, writeable=False)
 
-        # Mandatory metadata at root level
-        svc.add_path('/Mgmt/ProcessName', 'dbus-ads1115')
-        svc.add_path('/Mgmt/ProcessVersion', '0.1')
-        svc.add_path('/Mgmt/Connection', 'ADS1115')
+        # /CustomName: user-defined display name shown in the Venus OS GUI and VRM Portal.
+        # Setting this overrides the auto-generated label for the device.
+        svc.add_path('/CustomName', self._name or '', writeable=True,
+                     onchangecallback=self._handle_dbus_change)
 
-        svc.add_path('/DeviceInstance', device_id)
-        svc.add_path('/ProductId', 0xFFFF)
-        svc.add_path('/ProductName', self._product_name)
-        svc.add_path('/FirmwareVersion', '0.1')
-        svc.add_path('/HardwareVersion', '1.0')
-        svc.add_path('/Connected', 1)
+        # Mandatory metadata – use add_mandatory_paths() helper so we never
+        # accidentally omit a required path.  Real version strings ensure VRM
+        # Portal shows the correct firmware rather than '0.1'.
+        svc.add_mandatory_paths(
+            processname='dbus-ads1115',
+            processversion=_PACKAGE_VERSION,
+            connection='ADS1115 I2C',
+            deviceinstance=device_id,
+            productid=self._product_id,
+            productname=self._product_name,
+            firmwareversion=_PACKAGE_VERSION,
+            hardwareversion='1.0',
+            connected=1,
+        )
 
         logger.info(f"Registered D-Bus service: {service_name} with DeviceInstance {device_id}")
 
@@ -434,6 +462,12 @@ class TankSensor:
             self._tank_capacity = value
             return True
         if path in ('/FluidType', 'FluidType'):
+            return True
+        if path in ('/CustomName', 'CustomName'):
+            # Update internal name; no secondary D-Bus write needed because the
+            # caller already owns the value on the bus.
+            self._name = str(value) if value is not None else ''
+            logger.info(f"Tank {self._id}: CustomName changed to '{self._name}' via D-Bus")
             return True
         return False
 
@@ -637,19 +671,39 @@ class TankSensor:
             self._dbus_set('/FluidType', self._fluid_type.value)
             logger.info(f"Tank {self._id}: Fluid type changed to {self._fluid_type.name}")
         elif setting == 'custom_name':
-            # Update the name (though D-Bus doesn't have a /Name path, this is for internal use)
-            self._name = new_value
-            logger.info(f"Tank {self._id}: Custom name changed to '{new_value}'")
+            # Update the name and push to the /CustomName D-Bus path so the
+            # GUI stays in sync when the setting is changed from another source.
+            self._name = str(new_value) if new_value else ''
+            self._dbus_set('/CustomName', self._name)
+            logger.info(f"Tank {self._id}: Custom name changed to '{self._name}'")
         elif setting == 'raw_value_empty':
-            # Update sensor calibration - voltage at empty
-            # Convert voltage to resistance for internal use
-            self._sensor_min = 0.0  # Will be recalculated from voltage
-            logger.info(f"Tank {self._id}: Raw value empty set to {new_value}V")
+            # new_value is the ADC voltage when the tank is *empty*.
+            # Convert voltage → resistance via the voltage-divider formula so
+            # that _resistance_to_percentage() uses the correct calibration.
+            if isinstance(new_value, (int, float)) and 0.0 <= float(new_value) < self._reference_voltage:
+                self._sensor_min = round(self._voltage_to_resistance(float(new_value)), 4)
+                logger.info(
+                    f"Tank {self._id}: Calibrated empty point: "
+                    f"{new_value}V → {self._sensor_min:.4f}Ω"
+                )
+            else:
+                logger.warning(
+                    f"Tank {self._id}: raw_value_empty {new_value!r} is outside "
+                    f"[0, {self._reference_voltage}) V – ignoring"
+                )
         elif setting == 'raw_value_full':
-            # Update sensor calibration - voltage at full
-            # Convert voltage to resistance for internal use
-            self._sensor_max = 190.0  # Will be recalculated from voltage
-            logger.info(f"Tank {self._id}: Raw value full set to {new_value}V")
+            # new_value is the ADC voltage when the tank is *full*.
+            if isinstance(new_value, (int, float)) and 0.0 < float(new_value) < self._reference_voltage:
+                self._sensor_max = round(self._voltage_to_resistance(float(new_value)), 4)
+                logger.info(
+                    f"Tank {self._id}: Calibrated full point: "
+                    f"{new_value}V → {self._sensor_max:.4f}Ω"
+                )
+            else:
+                logger.warning(
+                    f"Tank {self._id}: raw_value_full {new_value!r} is outside "
+                    f"(0, {self._reference_voltage}) V – ignoring"
+                )
         elif setting == 'device_instance':
             # DeviceInstance changed in GUI - update D-Bus and internal state
             if new_value != self._device_instance:
@@ -667,9 +721,17 @@ class TankSensor:
         When status changes to a fault state, this will trigger
         /Alarms/Low/State to be set to 2 (Alarm), which venus-platform
         will pick up and create a notification for.
+
+        /Connected is kept in sync with sensor health so that VRM Portal
+        correctly shows the device as offline when a fault is detected.
         """
         self._status = status
         self._dbus_set('/Status', self._status.value)
+
+        # /Connected: 1 = operating normally, 0 = any hardware fault.
+        # Venus OS and the VRM Portal use this flag to distinguish a device
+        # that is present but broken from one that has never appeared.
+        self._dbus_set('/Connected', 1 if status == Status.OK else 0)
 
         # Update legacy /Alarm path (kept for compatibility)
         # Note: This path is NOT monitored by venus-platform for tank notifications
@@ -761,20 +823,29 @@ class TankSensor:
                 }
                 pga_bits = pga_map.get(self._pga, 1)  # default to 4.096V (bits=1)
 
-                for attempt in range(3):
-                    # OS=1 (start single conversion), MUX selects channel, PGA bits set from pga_bits
-                    config_msb = (1 << 7) | (mux << 4) | (pga_bits << 1)
-                    config_lsb = 0x03 | (7 << 5)  # MODE=single, DR=111 (128SPS)
-                    # ADS1115 expects MSB first when writing config: [MSB, LSB]
-                    bus.write_i2c_block_data(addr, 0x01, [config_msb, config_lsb])
-                    time.sleep(0.015)
-                    # Read conversion: device returns [MSB, LSB]
-                    data = bus.read_i2c_block_data(addr, 0x00, 2)
-                    raw = (data[0] << 8) | data[1]
-                    if raw < 32768:
-                        return raw
-                    time.sleep(0.005)
-            return None
+                # Single-shot conversion: write config, wait for result, read.
+                # One read per call is sufficient – the 15 ms sleep already covers
+                # the full ADS1115 conversion time at 128 SPS (~8 ms).  The old
+                # 3-attempt retry loop was masking real wiring issues by silently
+                # discarding signed (negative) raw values; now we return the proper
+                # two's-complement signed value and let the conversion chain decide
+                # how to handle it (near-zero → EMPTY, truly negative → SHORT_CIRCUITED
+                # via the stability check).
+                config_msb = (1 << 7) | (mux << 4) | (pga_bits << 1)
+                config_lsb = 0x03 | (7 << 5)  # MODE=single, DR=128SPS
+                # ADS1115 expects MSB first when writing config: [MSB, LSB]
+                bus.write_i2c_block_data(addr, 0x01, [config_msb, config_lsb])
+                time.sleep(0.015)  # ~8 ms conversion time at 128 SPS + margin
+                # Read conversion: device returns [MSB, LSB] big-endian
+                data = bus.read_i2c_block_data(addr, 0x00, 2)
+                raw = (data[0] << 8) | data[1]
+                # ADS1115 output is two's-complement signed 16-bit.
+                # Convert from unsigned representation to signed so that
+                # voltages below 0 V (reverse bias, miswiring) are correctly
+                # reflected downstream instead of being retried endlessly.
+                if raw > 32767:
+                    raw -= 65536
+                return raw
         except Exception as e:
             logger.error(f"ADC read error: {e}")
             return None

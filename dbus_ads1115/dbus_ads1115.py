@@ -109,7 +109,11 @@ from dbus_ads1115.sensors import TankSensor
 from dbus_ads1115.vedbus import VeDbusService
 
 logger = logging.getLogger(__name__)
-VERSION = '1.0.0'
+
+try:
+    from dbus_ads1115 import __version__ as VERSION
+except ImportError:
+    VERSION = '0.0.0'  # Safety fallback – should never be reached in a proper install
 
 class SensorManager:
     def __init__(self, config_filename):
@@ -130,28 +134,67 @@ class SensorManager:
         # Venus OS requires each tank to be its own D-Bus service for device list detection.
         # Service names will be: com.victronenergy.tank.ads1115_0, com.victronenergy.tank.ads1115_1, etc.
 
-        for cfg in sensors_cfg:
+        for idx, cfg in enumerate(sensors_cfg):
             cfg['i2c_bus'] = cfg.get('i2c_bus', i2c_cfg.get('bus', 1))
             cfg['i2c_address'] = cfg.get('i2c_address', i2c_cfg.get('address', '0x48'))
             cfg['reference_voltage'] = i2c_cfg.get('reference_voltage', 3.3)
             # Pass channel_map from i2c config to sensor
             cfg['channel_map'] = i2c_cfg.get('channel_map', [0, 1, 2, 3])
 
-            if cfg.get('type') == 'tank':
-                # Each sensor creates its own D-Bus service (dbus=None means create new service)
-                self._sensors.append(TankSensor(cfg, dbus=None))
+            if cfg.get('type') == 'tank' and cfg.get('enabled', True):
+                sensor = TankSensor(cfg, dbus=None)
+                self._sensors.append(sensor)
+
+                # Per-sensor update timer – honours update_interval from config.
+                # Stagger the first read by 200 ms per sensor index so that two
+                # sensors on the same I2C bus are never accessed simultaneously
+                # at boot (important for SMBus MUX settling).
+                interval = int(cfg.get('update_interval', 5000))
+                boot_delay = 500 + idx * 200
+                GLib.timeout_add(boot_delay, self._make_first_update(sensor, interval))
+                logging.info(
+                    f"Sensor '{cfg.get('name', f'tank_{idx}')}': "
+                    f"first read in {boot_delay} ms, then every {interval} ms"
+                )
+            elif cfg.get('type') == 'tank' and not cfg.get('enabled', True):
+                logging.info(
+                    f"Sensor '{cfg.get('name', f'tank_{idx}')}': skipped (enabled: false)"
+                )
+
+    def _make_first_update(self, sensor, interval):
+        """One-shot GLib callback: reads the sensor once, then arms the recurring timer."""
+        def _first():
+            try:
+                sensor.update()
+            except Exception:
+                logging.exception("Sensor first update failed")
+            GLib.timeout_add(interval, self._make_recurring_update(sensor))
+            return False  # Do not re-arm this callback
+        return _first
+
+    def _make_recurring_update(self, sensor):
+        """Recurring GLib callback for a single sensor – returns True to keep firing."""
+        def _cb():
+            try:
+                sensor.update()
+            except Exception:
+                logging.exception("Sensor update failed")
+            return True
+        return _cb
 
     def update(self):
-        import time
+        """Update all sensors synchronously.
+
+        Retained for backward-compatibility (e.g. test suites that call it
+        directly).  In production the per-sensor GLib timers registered in
+        _create_sensors() drive all updates; this method is NOT called from
+        main() and does NOT block the event loop.
+        """
         for s in self._sensors:
             try:
                 s.update()
             except Exception:
                 logging.exception("Sensor update failed, continuing with next sensor")
-            # ADS1015 kernel driver needs time to settle when switching channels.
-            # Without this delay, rapid successive reads from different channels
-            # can return incorrect values due to mux settling time.
-            time.sleep(0.1)  # 100ms delay between sensor reads
         return True
 
 def main():
@@ -164,7 +207,8 @@ def main():
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     
     manager = SensorManager(args.config)
-    GLib.timeout_add(5000, manager.update)
+    # Per-sensor update timers are registered inside SensorManager._create_sensors().
+    # No global timer is needed here.
     
     mainloop = GLib.MainLoop()
     try:
