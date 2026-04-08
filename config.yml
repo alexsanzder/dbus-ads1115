@@ -18,6 +18,12 @@ i2c:
 #   - Channel 0 (A0) → DeviceInstance 20 → Fresh Water Tank
 #   - Channel 1 (A1) → DeviceInstance 21 → Grey Water Tank
 #
+# Volume Units (volume_unit):
+#   Specify tank_capacity in any of: liters | cubic_meters | gallons_us | gallons_imp
+#   The driver converts to m³ internally — Venus OS always stores capacity in m³.
+#   The display unit shown in the GUI is set system-wide on the Cerbo GX at:
+#   Settings → System setup → Volume unit  (0=m³, 1=Liters, 2=US gal, 3=Imp gal)
+#
 sensors:
   # Fresh Water Tank - Channel 0 (A0)
   # Alarm: Warning when level drops below 20%
@@ -29,7 +35,8 @@ sensors:
     pga: 2.048
     sensor_min: 0.0        # Ohms (Empty tank)
     sensor_max: 190.0      # Ohms (Full tank)
-    tank_capacity: 0.07    # Cubic Meters (0.07 m3 = 70 Liters)
+    tank_capacity: 70      # 70 Liters
+    volume_unit: liters    # liters | cubic_meters | gallons_us | gallons_imp
     fluid_type: fresh_water
     update_interval: 3000  # milliseconds
     product_name: "A5-E225 (0-190Ω, 225mm)"
@@ -51,7 +58,8 @@ sensors:
     pga: 2.048
     sensor_min: 0.0        # Ohms (Empty tank)
     sensor_max: 190.0      # Ohms (Full tank)
-    tank_capacity: 0.07    # Cubic Meters (0.07 m3 = 70 Liters)
+    tank_capacity: 70      # 70 Liters
+    volume_unit: liters    # liters | cubic_meters | gallons_us | gallons_imp
     fluid_type: waste_water
     update_interval: 3000  # milliseconds
     product_name: "A5-E125 (0-190Ω, 125mm)"

@@ -29,6 +29,24 @@ ADS1115_RANGE = 4096
 ADS1115_OFFSET = 0
 ADS1115_PGA = 4.096
 
+# Volume unit conversion factors → m³.
+# Venus OS always stores /Capacity and /Remaining in m³ on D-Bus.
+# The display unit (liters, gallons…) is a system-wide setting on the
+# Cerbo GX / Venus OS at /Settings/System/VolumeUnit:
+#   0 = m³  |  1 = Liters  |  2 = US gallons  |  3 = Imperial gallons
+_VOLUME_TO_M3 = {
+    'cubic_meters':    1.0,
+    'm3':              1.0,
+    'liters':          1e-3,
+    'litres':          1e-3,
+    'l':               1e-3,
+    'gallons_us':      0.00378541,
+    'us_gallons':      0.00378541,
+    'gallons_imp':     0.00454609,
+    'gallons_imperial':0.00454609,
+    'imp_gallons':     0.00454609,
+}
+
 class _DbusProxy:
     """Small proxy that maps relative paths like '/Level' to absolute
     paths under a shared VeDbusService instance. VeDbusService expects
@@ -107,7 +125,26 @@ class TankSensor:
         self._fixed_resistor = config['fixed_resistor']
         self._sensor_min = config['sensor_min']
         self._sensor_max = config['sensor_max']
-        self._tank_capacity = config['tank_capacity']
+
+        # Tank capacity — accept any common unit via the optional volume_unit key.
+        # Internally everything is stored and published to D-Bus in m³.
+        # Venus OS display unit is system-wide (/Settings/System/VolumeUnit on the GX).
+        _raw_capacity = float(config['tank_capacity'])
+        _vol_unit = str(config.get('volume_unit', 'cubic_meters')).lower().strip()
+        _factor = _VOLUME_TO_M3.get(_vol_unit, None)
+        if _factor is None:
+            logger.warning(
+                f"Tank '{self._name}': unknown volume_unit '{_vol_unit}', "
+                f"assuming cubic_meters"
+            )
+            _factor = 1.0
+            _vol_unit = 'cubic_meters'
+        self._tank_capacity = _raw_capacity * _factor  # always m³ from here on
+        self._volume_unit = _vol_unit
+        logger.info(
+            f"Tank '{self._name}': capacity {_raw_capacity} {_vol_unit} "
+            f"= {self._tank_capacity:.6f} m³"
+        )
         self._fluid_type = self.FLUID_TYPE_MAP.get(config['fluid_type'], FluidType.FRESH_WATER)
         self._reference_voltage = config.get('reference_voltage', 3.3)
         self._i2c_bus = config.get('i2c_bus', 1)

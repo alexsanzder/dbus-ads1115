@@ -503,3 +503,63 @@ class TestTankSensorScaleOffset:
         # Combined: 1000 * 2.0 + 100 = 2100
         assert sensor._scale == 2.0
         assert sensor._offset == 100
+
+
+class TestTankSensorVolumeUnit:
+    """Test volume_unit conversion — capacity must always be stored in m³."""
+
+    def _make_sensor(self, mock_dbus, tank_capacity, volume_unit=None):
+        cfg = {
+            'type': 'tank', 'name': 'Vol Test', 'channel': 0,
+            'fixed_resistor': 220, 'sensor_min': 0.0, 'sensor_max': 190.0,
+            'tank_capacity': tank_capacity,
+            'fluid_type': 'fresh_water', 'i2c_bus': 1,
+            'i2c_address': '0x48', 'reference_voltage': 3.3,
+        }
+        if volume_unit is not None:
+            cfg['volume_unit'] = volume_unit
+        return TankSensor(cfg, dbus=mock_dbus)
+
+    def test_default_is_cubic_meters(self, mock_dbus):
+        """No volume_unit key → capacity treated as m³ unchanged."""
+        s = self._make_sensor(mock_dbus, 0.07)
+        assert abs(s._tank_capacity - 0.07) < 1e-9
+
+    def test_explicit_cubic_meters(self, mock_dbus):
+        s = self._make_sensor(mock_dbus, 0.07, 'cubic_meters')
+        assert abs(s._tank_capacity - 0.07) < 1e-9
+
+    def test_liters_to_m3(self, mock_dbus):
+        """70 liters == 0.07 m³."""
+        s = self._make_sensor(mock_dbus, 70, 'liters')
+        assert abs(s._tank_capacity - 0.07) < 1e-9
+
+    def test_litres_alias(self, mock_dbus):
+        """British spelling 'litres' accepted."""
+        s = self._make_sensor(mock_dbus, 70, 'litres')
+        assert abs(s._tank_capacity - 0.07) < 1e-9
+
+    def test_l_alias(self, mock_dbus):
+        """Short alias 'l' accepted."""
+        s = self._make_sensor(mock_dbus, 70, 'l')
+        assert abs(s._tank_capacity - 0.07) < 1e-9
+
+    def test_gallons_us(self, mock_dbus):
+        """1 US gallon = 0.00378541 m³."""
+        s = self._make_sensor(mock_dbus, 1.0, 'gallons_us')
+        assert abs(s._tank_capacity - 0.00378541) < 1e-7
+
+    def test_gallons_imp(self, mock_dbus):
+        """1 Imperial gallon = 0.00454609 m³."""
+        s = self._make_sensor(mock_dbus, 1.0, 'gallons_imp')
+        assert abs(s._tank_capacity - 0.00454609) < 1e-7
+
+    def test_unknown_unit_falls_back_to_m3(self, mock_dbus):
+        """Unknown unit → warning logged, value treated as m³."""
+        s = self._make_sensor(mock_dbus, 0.05, 'barrels')
+        assert abs(s._tank_capacity - 0.05) < 1e-9
+
+    def test_volume_unit_stored(self, mock_dbus):
+        """_volume_unit attribute reflects the resolved unit name."""
+        s = self._make_sensor(mock_dbus, 70, 'liters')
+        assert s._volume_unit == 'liters'

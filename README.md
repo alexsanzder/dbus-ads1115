@@ -197,7 +197,8 @@ sensors:
     fixed_resistor: 220           # Pull-up resistor in Ohms
     sensor_min: 0.2               # Resistance when empty
     sensor_max: 189.8             # Resistance when full
-    tank_capacity: 0.07           # Capacity in m³ (0.07 = 70L)
+    tank_capacity: 70             # Capacity in your chosen unit
+    volume_unit: liters           # liters | cubic_meters | gallons_us | gallons_imp
     fluid_type: fresh_water
     update_interval: 3000         # Update every 3 seconds
     product_name: "A5-E225 (0-190Ω, 225mm)"
@@ -221,7 +222,8 @@ sensors:
     fixed_resistor: 220
     sensor_min: 0.2
     sensor_max: 189.8
-    tank_capacity: 0.07           # 70 Liters
+    tank_capacity: 70             # 70 Liters
+    volume_unit: liters           # liters | cubic_meters | gallons_us | gallons_imp
     fluid_type: fresh_water
     update_interval: 3000
     product_name: "A5-E225 (0-190Ω, 225mm)"
@@ -235,7 +237,8 @@ sensors:
     fixed_resistor: 220
     sensor_min: 0.2
     sensor_max: 189.8
-    tank_capacity: 0.07           # Adjust to your tank size
+    tank_capacity: 70             # 70 Liters
+    volume_unit: liters           # liters | cubic_meters | gallons_us | gallons_imp
     fluid_type: waste_water
     update_interval: 3000
     product_name: "A5-E125 (0-190Ω, 125mm)"
@@ -253,11 +256,16 @@ sensors:
 | `pga`           | Programmable Gain Amplifier voltage range (default 2.048V) |
 | `sensor_min`    | Sensor resistance at EMPTY position (Ohms)       |
 | `sensor_max`    | Sensor resistance at FULL position (Ohms)         |
-| `tank_capacity` | Tank capacity in cubic meters (1 m³ = 1000L)     |
+| `tank_capacity` | Tank capacity in the unit specified by `volume_unit` |
+| `volume_unit`   | Unit for `tank_capacity`: `liters`, `cubic_meters`, `gallons_us`, `gallons_imp` (default: `cubic_meters`) |
 | `fluid_type`    | `fresh_water`, `waste_water`, `fuel`, etc.       |
 | `update_interval`| How often to read sensor (milliseconds)         |
 | `product_name`  | Custom product name shown in device info         |
-| `product_id`   | Numeric product ID for VRM Portal (hex or int, e.g. `0xA5225`) |
+| `product_id`    | Numeric product ID for VRM Portal (hex or int, e.g. `0xA5225`) |
+
+> **Note on display units:** The driver always converts `tank_capacity` to m³ internally — this is what Venus OS stores on D-Bus. The **display unit** shown in the GUI (Liters, Gallons, etc.) is a **system-wide** setting on your Cerbo GX / Venus OS device:
+> `Settings → System setup → Volume unit`
+> (0 = m³ · 1 = Liters · 2 = US gallons · 3 = Imperial gallons)
 
 ### Per-Sensor Alarms (Optional)
 
