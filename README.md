@@ -250,7 +250,7 @@ sensors:
     fluid_type: fresh_water
     update_interval: 3000         # Update every 3 seconds
     product_name: "A5-E225 (0-190Ω, 225mm)"
-    product_id: 0xA225           # Numeric product ID for VRM Portal (hex or int)
+    product_id: 0xE225           # Numeric product ID for VRM Portal (hex or int)
 ```
 
 ### Dual Tank Configuration
@@ -275,7 +275,7 @@ sensors:
     fluid_type: fresh_water
     update_interval: 3000
     product_name: "A5-E225 (0-190Ω, 225mm)"
-    product_id: 0xA225
+    product_id: 0xE225
 
   # Grey Water Tank - Channel A1
   - type: tank
@@ -290,7 +290,7 @@ sensors:
     fluid_type: waste_water
     update_interval: 3000
     product_name: "A5-E125 (0-190Ω, 125mm)"
-    product_id: 0xA125
+    product_id: 0xE125
 ```
 
 ### Configuration Parameters
@@ -309,7 +309,7 @@ sensors:
 | `fluid_type`    | `fresh_water`, `waste_water`, `fuel`, etc.       |
 | `update_interval`| How often to read sensor (milliseconds)         |
 | `product_name`  | Custom product name shown in device info         |
-| `product_id`    | Numeric product ID for VRM Portal (hex or int, e.g. `0xA5225`) |
+| `product_id`    | Numeric product ID for VRM Portal (hex or int, e.g. `0xE5225`) |
 
 > **Note on `sensor_min` / `sensor_max`:** These are the **initial** calibration values in Ohms (Ω). Once the sensor appears in the Venus OS GUI you can refine calibration live from `Settings → Devices → <Tank> → Setup` without editing `config.yml`. GUI changes are persisted in `com.victronenergy.settings` and survive service restarts.
 

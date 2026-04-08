@@ -69,7 +69,7 @@ sensors:
     fluid_type: fresh_water
     update_interval: 3000  # milliseconds
     product_name: "A5-E225 (0-190Ω, 225mm)"
-    product_id: 0xA225     # Numeric product ID shown in VRM Portal (hex or int)
+    product_id: 0xE225     # Numeric product ID shown in VRM Portal (hex or int)
     alarms:
       low:
         enable: true
@@ -92,7 +92,7 @@ sensors:
     fluid_type: waste_water
     update_interval: 3000  # milliseconds
     product_name: "A5-E125 (0-190Ω, 125mm)"
-    product_id: 0xA125     # Numeric product ID shown in VRM Portal (hex or int)
+    product_id: 0xE125     # Numeric product ID shown in VRM Portal (hex or int)
     alarms:
       high:
         enable: true
