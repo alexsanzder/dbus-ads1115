@@ -88,6 +88,17 @@ class TankSensor:
     _ids = count(0)
     _used_service_names = set()  # Track used service names to avoid conflicts
 
+    # Standard wiring presets (mirrors Venus OS GUI values)
+    STANDARD_EUROPEAN = 0   # 0–180 Ω  (empty=0 Ω, full=180 Ω)
+    STANDARD_US        = 1  # 240–30 Ω (empty=240 Ω, full=30 Ω)
+    STANDARD_CUSTOM    = 2  # user-defined via RawValueEmpty / RawValueFull
+
+    # Resistance ranges for the named standards
+    _STANDARD_RANGES = {
+        STANDARD_EUROPEAN: (0.0,   180.0),   # (sensor_min, sensor_max)
+        STANDARD_US:        (240.0,  30.0),
+    }
+
     # Fluid type mapping
     FLUID_TYPE_MAP = {
         'fresh_water': FluidType.FRESH_WATER,
@@ -100,6 +111,31 @@ class TankSensor:
 
     # Shared D-Bus connection for all sensors
     _shared_dbus = None
+
+    @staticmethod
+    def _parse_shape(value):
+        """Parse a Venus OS /Shape string into a sorted list of (sensor_pct, volume_pct) tuples.
+
+        Venus OS stores shape points as a comma-separated string of
+        "<sensor_level>:<volume>" integer-percentage pairs, e.g. "10:5,50:40,80:90".
+        0% and 100% are implicit and never stored.
+
+        Returns an empty list if the value is falsy or cannot be parsed.
+        """
+        if not value:
+            return []
+        try:
+            points = []
+            for token in str(value).split(','):
+                token = token.strip()
+                if not token:
+                    continue
+                sensor_s, vol_s = token.split(':')
+                points.append((int(sensor_s), int(vol_s)))
+            points.sort(key=lambda p: p[0])
+            return points
+        except Exception:
+            return []
 
     def __init__(self, config, dbus=None):
         """Initialize TankSensor from configuration."""
@@ -125,6 +161,18 @@ class TankSensor:
         self._fixed_resistor = config['fixed_resistor']
         self._sensor_min = config['sensor_min']
         self._sensor_max = config['sensor_max']
+
+        # Sensor standard preset: 0=European, 1=US, 2=Custom
+        # Default to Custom so existing sensor_min/max from config.yml are preserved.
+        self._standard = TankSensor.STANDARD_CUSTOM
+        # Live sensor resistance in Ω exposed as /RawValue on D-Bus (read-only).
+        # Units match /RawUnit = "Ω", consistent with European/US/Custom standards.
+        self._raw_value = 0.0
+        # Custom tank shape: list of (sensor_level_pct, volume_pct) tuples,
+        # sorted ascending by sensor_level_pct.  Empty list = linear mapping.
+        # Format on D-Bus: "sensorLevel:volume,..." e.g. "10:5,50:40,80:90"
+        self._shape = []          # list of (int, int) tuples
+        self._shape_str = ''      # raw string kept in sync with /Shape
 
         # Tank capacity — accept any common unit via the optional volume_unit key.
         # Internally everything is stored and published to D-Bus in m³.
@@ -192,7 +240,7 @@ class TankSensor:
         # These are monitored by venus-platform for notifications
         # Read from config if provided, otherwise use defaults
         alarms_config = config.get('alarms', {})
-        
+
         # Low level alarm configuration
         low_config = alarms_config.get('low', {})
         self._low_alarm_enabled = 1 if low_config.get('enable', False) else 0
@@ -244,7 +292,7 @@ class TankSensor:
         # Sanitize name: lowercase, replace spaces with underscores, remove special chars
         if self._name:
             device_identifier = ''.join(
-                c if c.isalnum() or c == '_' else '_' 
+                c if c.isalnum() or c == '_' else '_'
                 for c in self._name.lower().replace(' ', '_')
             ).strip('_')
             # Remove consecutive underscores
@@ -252,7 +300,7 @@ class TankSensor:
                 device_identifier = device_identifier.replace('__', '_')
         else:
             device_identifier = f'tank_{self._id}'
-        
+
         self._device_identifier = device_identifier
         logger.info(f"Tank Sensor {self._id}: '{self._name}' -> device identifier '{device_identifier}'")
 
@@ -264,34 +312,42 @@ class TankSensor:
         # This allows reading DeviceInstance from settings
         self._ve_service = None
         self._settings_dbus_connection = self._create_dbus_connection()
-        
+
         # Attach to settings using Venus OS standard paths
         # Path format: /Settings/Devices/<device_identifier>/<setting>
         # This allows Venus OS GUI to discover and configure the tank
         self._settings_base = {
             # Device identification (required for VRM and GUI discovery)
-            'instance': [f'/Settings/Devices/{device_identifier}/ClassAndVrmInstance', 
+            'instance': [f'/Settings/Devices/{device_identifier}/ClassAndVrmInstance',
                         f'tank:{self._device_instance}', '', ''],
-            'device_instance': [f'/Settings/Devices/{device_identifier}/DeviceInstance', 
+            'device_instance': [f'/Settings/Devices/{device_identifier}/DeviceInstance',
                                self._device_instance, 0, 100],
             # Tank configuration
-            'capacity': [f'/Settings/Devices/{device_identifier}/Capacity', 
+            'capacity': [f'/Settings/Devices/{device_identifier}/Capacity',
                         float(self._tank_capacity), 0.0, 100000.0],
-            'fluid_type': [f'/Settings/Devices/{device_identifier}/FluidType', 
+            'fluid_type': [f'/Settings/Devices/{device_identifier}/FluidType',
                           self._fluid_type.value, 0, 11],
-            'custom_name': [f'/Settings/Devices/{device_identifier}/CustomName', 
+            'custom_name': [f'/Settings/Devices/{device_identifier}/CustomName',
                            self._name or '', '', ''],
-            # Sensor calibration (voltage-based)
-            'raw_value_empty': [f'/Settings/Devices/{device_identifier}/RawValueEmpty', 
-                               0.0, 0.0, 5.0],
-            'raw_value_full': [f'/Settings/Devices/{device_identifier}/RawValueFull', 
-                              3.3, 0.0, 5.0],
+            # Sensor standard preset (mirrors Venus OS /Standard path)
+            # 0=European (0-180Ω), 1=US (240-30Ω), 2=Custom
+            'standard': [f'/Settings/Devices/{device_identifier}/Standard',
+                        TankSensor.STANDARD_CUSTOM, 0, 2],
+            # Custom tank shape: stored as Venus OS format "sensorLevel:volume,..."
+            # Empty string = no custom shape (linear mapping used)
+            'shape': [f'/Settings/Devices/{device_identifier}/Shape', '', '', ''],
+            # Sensor calibration — values in Ω (resistance at empty/full).
+            # European: 0–180 Ω, US: 240–30 Ω, Custom: user-defined up to 10 kΩ.
+            'raw_value_empty': [f'/Settings/Devices/{device_identifier}/RawValueEmpty',
+                               float(self._sensor_min), 0.0, 10000.0],
+            'raw_value_full': [f'/Settings/Devices/{device_identifier}/RawValueFull',
+                              float(self._sensor_max), 0.0, 10000.0],
             # Legacy calibration (resistance-based)
             'scale': [f'/Settings/Devices/{device_identifier}/Scale', 1.0, 0.0, 10.0],
             'offset': [f'/Settings/Devices/{device_identifier}/Offset', 0, 0, ADS1115_RANGE],
         }
         self._settings = self._attach_to_settings(self._settings_base, self._setting_changed)
-        
+
         # Read DeviceInstance from settings (may have been changed by user in GUI)
         try:
             stored_instance = self._settings.get('device_instance', self._device_instance)
@@ -306,13 +362,13 @@ class TankSensor:
 
     def _create_dbus_connection(self):
         """Create a private D-Bus connection for settings access.
-        
+
         This is needed before creating the D-Bus service so we can read
         settings (like DeviceInstance) from the com.victronenergy.settings service.
         """
         if _dbus_module is None:
             return None
-        
+
         try:
             import os
             bus_address = os.environ.get(
@@ -446,6 +502,27 @@ class TankSensor:
         svc.add_path('/Status', self._status.value, writeable=False)
         svc.add_path('/FluidType', self._fluid_type.value, writeable=True, onchangecallback=self._handle_dbus_change)
 
+        # Standard preset: 0=European (0-180Ω), 1=US (240-30Ω), 2=Custom
+        # When the user changes this in the GUI Setup page the driver will
+        # automatically update sensor_min / sensor_max accordingly.
+        svc.add_path('/Standard', self._standard, writeable=True, onchangecallback=self._handle_dbus_change)
+
+        # Raw ADC paths – displayed / edited in the Setup sub-page.
+        # For European (0) and US (1) standards the calibration is fixed in Ω,
+        # so we expose the live resistance in Ω too.
+        # For Custom (2) the user calibrates in Ω (sensor_min / sensor_max),
+        # so we also use Ω for consistency with the resistive sensor convention.
+        # The GUI uses /RawUnit as the suffix on RawValue, RawValueEmpty, RawValueFull.
+        svc.add_path('/RawUnit', 'Ω', writeable=False)
+        svc.add_path('/RawValue', self._raw_value, writeable=False)
+        svc.add_path('/RawValueEmpty', round(float(self._sensor_min), 1), writeable=True, onchangecallback=self._handle_dbus_change)
+        svc.add_path('/RawValueFull',  round(float(self._sensor_max), 1), writeable=True, onchangecallback=self._handle_dbus_change)
+
+        # Custom tank shape: comma-separated "sensorLevel:volume" pairs (1-99 integers).
+        # An empty/None value means no shape defined → linear mapping is used.
+        # The GUI Setup page shows "Custom shape" navigation only when this path exists.
+        svc.add_path('/Shape', self._shape_str or None, writeable=True, onchangecallback=self._handle_dbus_change)
+
         # Level-based alarm paths (Venus OS notification system)
         # These paths are monitored by venus-platform to create notifications
         # when alarm states change from 0 (Ok) to 2 (Alarm)
@@ -505,6 +582,36 @@ class TankSensor:
             # caller already owns the value on the bus.
             self._name = str(value) if value is not None else ''
             logger.info(f"Tank {self._id}: CustomName changed to '{self._name}' via D-Bus")
+            return True
+        if path in ('/Standard', 'Standard'):
+            std = int(value)
+            self._standard = std
+            if std in TankSensor._STANDARD_RANGES:
+                s_min, s_max = TankSensor._STANDARD_RANGES[std]
+                self._sensor_min = s_min
+                self._sensor_max = s_max
+                logger.info(
+                    f"Tank {self._id} ({self._name}): Standard preset {std} applied "
+                    f"→ sensor_min={s_min}Ω, sensor_max={s_max}Ω"
+                )
+            return True
+        if path in ('/RawValueEmpty', 'RawValueEmpty'):
+            if isinstance(value, (int, float)) and float(value) >= 0.0:
+                self._sensor_min = round(float(value), 1)
+                logger.info(f"Tank {self._id}: RawValueEmpty={value}Ω → sensor_min={self._sensor_min:.1f}Ω")
+            return True
+        if path in ('/RawValueFull', 'RawValueFull'):
+            if isinstance(value, (int, float)) and float(value) >= 0.0:
+                self._sensor_max = round(float(value), 1)
+                logger.info(f"Tank {self._id}: RawValueFull={value}Ω → sensor_max={self._sensor_max:.1f}Ω")
+            return True
+        if path in ('/Shape', 'Shape'):
+            self._shape_str = value or ''
+            self._shape = TankSensor._parse_shape(self._shape_str)
+            logger.info(
+                f"Tank {self._id} ({self._name}): Shape updated "
+                f"→ {len(self._shape)} point(s): {self._shape_str!r}"
+            )
             return True
         return False
 
@@ -631,13 +738,13 @@ class TankSensor:
             self._dbus_set('/Alarms/High/State', self._high_alarm_state)
 
     def _attach_to_settings(self, settings_base, event_callback):
-        # SettingsDevice requires a raw dbus connection. 
+        # SettingsDevice requires a raw dbus connection.
         # We create a dedicated connection for settings before the D-Bus service.
         # If no usable bus is available (for example in unit tests), provide a
         # lightweight dummy bus that implements the minimal API used by
         # SettingsDevice so it can initialise without blocking.
         bus = self._settings_dbus_connection
-        
+
         if bus is None:
             class _DummyProxy:
                 def AddSetting(self, *args, **kwargs):
@@ -678,7 +785,7 @@ class TankSensor:
 
     def _setting_changed(self, setting, *args):
         """Handle setting changes from Venus OS GUI or other sources.
-        
+
         This callback is triggered when any setting changes via the
         com.victronenergy.settings D-Bus service. Changes are synced
         to the tank service D-Bus paths.
@@ -697,6 +804,26 @@ class TankSensor:
             self._scale = new_value
         elif setting == 'offset':
             self._offset = new_value
+        elif setting == 'standard':
+            std = int(new_value)
+            self._standard = std
+            self._dbus_set('/Standard', std)
+            if std in TankSensor._STANDARD_RANGES:
+                s_min, s_max = TankSensor._STANDARD_RANGES[std]
+                self._sensor_min = s_min
+                self._sensor_max = s_max
+                logger.info(
+                    f"Tank {self._id} ({self._name}): Standard preset {std} applied via settings "
+                    f"→ sensor_min={s_min}Ω, sensor_max={s_max}Ω"
+                )
+        elif setting == 'shape':
+            self._shape_str = new_value or ''
+            self._shape = TankSensor._parse_shape(self._shape_str)
+            self._dbus_set('/Shape', self._shape_str or None)
+            logger.info(
+                f"Tank {self._id} ({self._name}): Shape loaded from settings "
+                f"→ {len(self._shape)} point(s): {self._shape_str!r}"
+            )
         elif setting == 'capacity':
             self._tank_capacity = new_value
             self._dbus_set('/Capacity', float(new_value))
@@ -714,33 +841,19 @@ class TankSensor:
             self._dbus_set('/CustomName', self._name)
             logger.info(f"Tank {self._id}: Custom name changed to '{self._name}'")
         elif setting == 'raw_value_empty':
-            # new_value is the ADC voltage when the tank is *empty*.
-            # Convert voltage → resistance via the voltage-divider formula so
-            # that _resistance_to_percentage() uses the correct calibration.
-            if isinstance(new_value, (int, float)) and 0.0 <= float(new_value) < self._reference_voltage:
-                self._sensor_min = round(self._voltage_to_resistance(float(new_value)), 4)
-                logger.info(
-                    f"Tank {self._id}: Calibrated empty point: "
-                    f"{new_value}V → {self._sensor_min:.4f}Ω"
-                )
+            if isinstance(new_value, (int, float)) and float(new_value) >= 0.0:
+                self._sensor_min = round(float(new_value), 1)
+                self._dbus_set('/RawValueEmpty', self._sensor_min)
+                logger.info(f"Tank {self._id}: Calibrated empty point: {new_value}Ω → sensor_min={self._sensor_min:.1f}Ω")
             else:
-                logger.warning(
-                    f"Tank {self._id}: raw_value_empty {new_value!r} is outside "
-                    f"[0, {self._reference_voltage}) V – ignoring"
-                )
+                logger.warning(f"Tank {self._id}: raw_value_empty {new_value!r} is invalid – ignoring")
         elif setting == 'raw_value_full':
-            # new_value is the ADC voltage when the tank is *full*.
-            if isinstance(new_value, (int, float)) and 0.0 < float(new_value) < self._reference_voltage:
-                self._sensor_max = round(self._voltage_to_resistance(float(new_value)), 4)
-                logger.info(
-                    f"Tank {self._id}: Calibrated full point: "
-                    f"{new_value}V → {self._sensor_max:.4f}Ω"
-                )
+            if isinstance(new_value, (int, float)) and float(new_value) >= 0.0:
+                self._sensor_max = round(float(new_value), 1)
+                self._dbus_set('/RawValueFull', self._sensor_max)
+                logger.info(f"Tank {self._id}: Calibrated full point: {new_value}Ω → sensor_max={self._sensor_max:.1f}Ω")
             else:
-                logger.warning(
-                    f"Tank {self._id}: raw_value_full {new_value!r} is outside "
-                    f"(0, {self._reference_voltage}) V – ignoring"
-                )
+                logger.warning(f"Tank {self._id}: raw_value_full {new_value!r} is invalid – ignoring")
         elif setting == 'device_instance':
             # DeviceInstance changed in GUI - update D-Bus and internal state
             if new_value != self._device_instance:
@@ -909,11 +1022,53 @@ class TankSensor:
         if voltage <= 0: return 0.0
         return (voltage * self._fixed_resistor) / (self._reference_voltage - voltage)
 
+    def _apply_shape_correction(self, linear_pct):
+        """Apply custom tank shape correction via piecewise linear interpolation.
+
+        Venus OS stores shape points as (sensor_level_pct, volume_pct) pairs,
+        where sensor_level_pct is the raw resistive sensor reading (0-100%)
+        and volume_pct is the actual tank volume percentage (0-100%).
+
+        The curve implicitly passes through (0, 0) and (100, 100), so shape
+        points define intermediate corrections only (stored as 1-99 integers).
+
+        Example: a cylindrical tank on its side needs an S-curve correction
+        because equal height changes give unequal volume changes.
+
+        Args:
+            linear_pct: raw sensor percentage from linear resistance mapping (0-100)
+
+        Returns:
+            volume_pct: corrected volume percentage (0-100), or linear_pct if no shape.
+        """
+        if not self._shape:
+            return linear_pct
+
+        # Build full interpolation table including implicit endpoints (0,0) and (100,100)
+        points = [(0, 0)] + list(self._shape) + [(100, 100)]
+
+        # Clamp input
+        x = max(0.0, min(100.0, linear_pct))
+
+        # Find the two surrounding points and interpolate linearly between them
+        for i in range(len(points) - 1):
+            x0, y0 = points[i]
+            x1, y1 = points[i + 1]
+            if x0 <= x <= x1:
+                if x1 == x0:
+                    return float(y0)
+                t = (x - x0) / (x1 - x0)
+                return float(y0 + t * (y1 - y0))
+
+        return x  # fallback (should never be reached given clamping)
+
     def _resistance_to_percentage(self, resistance):
         if self._sensor_max == self._sensor_min: return 0.0
         # Maps resistance range [sensor_min, sensor_max] to [0, 100]%
-        percentage = (resistance - self._sensor_min) / (self._sensor_max - self._sensor_min) * 100
-        return max(0.0, min(100.0, percentage))
+        linear_pct = (resistance - self._sensor_min) / (self._sensor_max - self._sensor_min) * 100
+        linear_pct = max(0.0, min(100.0, linear_pct))
+        # Apply custom shape correction if defined by user in GUI
+        return self._apply_shape_correction(linear_pct)
 
     def _percentage_to_resistance(self, percentage):
         """Inverse of _resistance_to_percentage: map percentage to resistance."""
@@ -980,7 +1135,7 @@ class TankSensor:
         # vs random jumping (disconnected)
         # Count sign changes in differences - random noise has many sign changes
         diffs = [values[i+1] - values[i] for i in range(len(values)-1)]
-        sign_changes = sum(1 for i in range(len(diffs)-1) 
+        sign_changes = sum(1 for i in range(len(diffs)-1)
                           if (diffs[i] > 0) != (diffs[i+1] > 0))
 
         # If there are many sign changes, readings are erratic (disconnected)
@@ -1048,6 +1203,11 @@ class TankSensor:
             raw_value = raw_value * self._scale + self._offset
             voltage = self._raw_to_voltage(raw_value)
             resistance = self._voltage_to_resistance(voltage)
+
+            # Publish the live resistance so the GUI Setup page can display it
+            # Units match /RawUnit = "Ω" — consistent with European/US/Custom standards.
+            self._raw_value = round(resistance, 1) if resistance != float('inf') else 9999.0
+            self._dbus_set('/RawValue', self._raw_value)
 
             # Detect sensor fault conditions
             # 1. Open circuit (disconnected): resistance is infinity

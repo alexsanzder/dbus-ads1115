@@ -5,8 +5,10 @@ This service allows you to connect resistive sensors (like water level, fuel, or
 
 ## 🚀 Features
 - **Multi-channel support:** Use all 4 channels of the ADS1115.
-- **Smart Calibration:** Easy min/max resistance setup via YAML.
-- **Venus OS Integration:** Appears as a native Tank sensor in the GUI/Remote Console.
+- **Smart Calibration:** Easy min/max resistance setup via YAML or live from the Venus OS GUI Setup page.
+- **Standard Presets:** European (0–180 Ω) and US (240–30 Ω) wiring standards selectable in the GUI.
+- **Custom Tank Shape:** Correct non-linear tanks (cylindrical, D-shaped) with up to 10-point piecewise curves — configured in the GUI.
+- **Venus OS Integration:** Appears as a native Tank sensor in the GUI/Remote Console with full Setup page support.
 - **Direct SMBus Access:** Uses `smbus2` for direct I2C communication — no kernel driver required. Avoids the broken `ti-ads1015` kernel driver which has inverted channel ordering and multiplexing instability.
 - **Auto-installed Dependencies:** `smbus2` is automatically installed by the setup script on every install and firmware-update. No manual steps needed.
 
@@ -248,7 +250,7 @@ sensors:
     fluid_type: fresh_water
     update_interval: 3000         # Update every 3 seconds
     product_name: "A5-E225 (0-190Ω, 225mm)"
-    product_id: 0xA5225           # Numeric product ID for VRM Portal (hex or int)
+    product_id: 0xA225           # Numeric product ID for VRM Portal (hex or int)
 ```
 
 ### Dual Tank Configuration
@@ -300,14 +302,16 @@ sensors:
 | `channel`       | ADS1115 input channel (0=A0, 1=A1, 2=A2, 3=A3)   |
 | `fixed_resistor`| Pull-up resistor value in Ohms (typically 220Ω)  |
 | `pga`           | Programmable Gain Amplifier voltage range (default 2.048V) |
-| `sensor_min`    | Sensor resistance at EMPTY position (Ohms)       |
-| `sensor_max`    | Sensor resistance at FULL position (Ohms)         |
+| `sensor_min`    | **Sensor resistance at EMPTY in Ω** — used as initial default; overridden by GUI calibration or Standard preset |
+| `sensor_max`    | **Sensor resistance at FULL in Ω** — used as initial default; overridden by GUI calibration or Standard preset |
 | `tank_capacity` | Tank capacity in the unit specified by `volume_unit` |
 | `volume_unit`   | Unit for `tank_capacity`: `liters`, `cubic_meters`, `gallons_us`, `gallons_imp` (default: `cubic_meters`) |
 | `fluid_type`    | `fresh_water`, `waste_water`, `fuel`, etc.       |
 | `update_interval`| How often to read sensor (milliseconds)         |
 | `product_name`  | Custom product name shown in device info         |
 | `product_id`    | Numeric product ID for VRM Portal (hex or int, e.g. `0xA5225`) |
+
+> **Note on `sensor_min` / `sensor_max`:** These are the **initial** calibration values in Ohms (Ω). Once the sensor appears in the Venus OS GUI you can refine calibration live from `Settings → Devices → <Tank> → Setup` without editing `config.yml`. GUI changes are persisted in `com.victronenergy.settings` and survive service restarts.
 
 > **Note on display units:** The driver always converts `tank_capacity` to m³ internally — this is what Venus OS stores on D-Bus. The **display unit** shown in the GUI (Liters, Gallons, etc.) is a **system-wide** setting on your Cerbo GX / Venus OS device:
 > `Settings → System setup → Volume unit`
@@ -359,20 +363,104 @@ Available fluid types for Venus OS:
 
 ## 🔧 Calibration
 
+### Initial Calibration via `config.yml`
+
 1. **Empty Tank Calibration:**
    - Disconnect sensor wire from ADC
    - Measure sensor resistance with multimeter
-   - Set `sensor_min` to this value
+   - Set `sensor_min` to this value (in Ω)
 
 2. **Full Tank Calibration:**
    - Fill tank to known level (100%)
    - Measure sensor resistance
-   - Set `sensor_max` to this value
+   - Set `sensor_max` to this value (in Ω)
 
 3. **Fine-tuning:**
    - Check readings in Venus OS
-   - Adjust min/max values as needed
+   - Adjust `sensor_min` / `sensor_max` values as needed
    - Restart service: `svc -t /service/dbus-ads1115`
+
+### Live Calibration via Venus OS GUI
+
+After the sensor appears on your Venus OS device you can calibrate without SSH or editing files:
+
+`Settings → Devices → <Tank name> → Setup`
+
+| GUI field | D-Bus path | Description |
+|---|---|---|
+| Sensor value when empty | `/RawValueEmpty` | Resistance at empty in Ω |
+| Sensor value when full | `/RawValueFull` | Resistance at full in Ω |
+| Sensor value (live) | `/RawValue` | Current live resistance in Ω (read-only) |
+
+Changes are saved automatically and persist across service restarts.
+
+---
+
+## 🎛 Venus OS GUI Setup
+
+The driver exposes a full **Setup** page for every tank sensor at:
+
+`Settings → Devices → <Tank name> → Setup`
+
+### Wiring Standard Presets
+
+Select the sensor wiring standard that matches your sensors:
+
+| Value | Standard | Empty resistance | Full resistance |
+|-------|----------|-----------------|----------------|
+| 0 | **European** | 0 Ω | 180 Ω |
+| 1 | **US / NMEA** | 240 Ω | 30 Ω |
+| 2 | **Custom** | `sensor_min` (config.yml / GUI) | `sensor_max` (config.yml / GUI) |
+
+Selecting European or US **automatically** sets the empty/full resistance values. Custom uses whatever you set manually.
+
+> The default at first install is **Custom** — your `config.yml` `sensor_min` / `sensor_max` values apply.
+
+### Custom Tank Shape
+
+Real-world tanks are rarely perfectly linear — cylindrical tanks on their side, D-shaped hulls, and cone-bottom tanks all need a correction curve.
+
+Navigate to `Setup → Custom shape` and enter up to **10 correction points** as `sensorLevel:volume` integer-percentage pairs:
+
+```
+10:5,50:40,80:90
+```
+
+This means:
+- When sensor reads **10%** → actual volume is **5%**
+- When sensor reads **50%** → actual volume is **40%**
+- When sensor reads **80%** → actual volume is **90%**
+
+The curve implicitly passes through **0%→0%** and **100%→100%**, so you never need to specify the endpoints. Points are sorted automatically. An empty shape field disables correction (linear mapping).
+
+The shape correction is applied **after** the resistance-to-percentage linear mapping, so it works correctly with all three standard presets.
+
+### D-Bus Paths Published
+
+| D-Bus path | Type | Description |
+|---|---|---|
+| `/Standard` | int (rw) | Wiring standard: 0=European, 1=US, 2=Custom |
+| `/RawUnit` | string (ro) | Always `"Ω"` — units for all Raw* values |
+| `/RawValue` | float (ro) | Live sensor resistance in Ω (1 decimal, updated every cycle) |
+| `/RawValueEmpty` | float (rw) | Calibrated resistance at empty in Ω |
+| `/RawValueFull` | float (rw) | Calibrated resistance at full in Ω |
+| `/Shape` | string (rw) | Custom shape: `"s:v,s:v,..."` pairs or empty |
+| `/Level` | float (ro) | Tank level 0–100% |
+| `/Remaining` | float (ro) | Remaining volume in m³ |
+| `/Capacity` | float (rw) | Tank capacity in m³ |
+| `/FluidType` | int (rw) | Fluid type (see Fluid Types table) |
+| `/Status` | int (ro) | Sensor status (0=OK, 3=Disconnected, etc.) |
+
+### ⚠️ Known Issue: Ω Decimals in Setup Page
+
+The Venus OS GUI (`gui-v2`) currently displays **3 decimal places** for the Ω values in the Setup page (e.g. `42.000 Ω` instead of `42.0 Ω`) because `PageTankSetup.qml` does not have a specific case for the `"Ω"` unit symbol.
+
+A fix has been submitted upstream:
+**[victronenergy/gui-v2 PR #2915](https://github.com/victronenergy/gui-v2/pull/2915)** — adds `case "Ω":` returning 1 decimal place and a step size of 1.
+
+Once Victron merges this PR and releases a firmware update, the display will automatically show 1 decimal place. Until then, the 3-decimal display is cosmetic only — calibration and level readings are not affected.
+
+---
 
 ## 📜 License
 This project is released under the MIT License.
