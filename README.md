@@ -275,7 +275,7 @@ sensors:
     fluid_type: fresh_water
     update_interval: 3000
     product_name: "A5-E225 (0-190Ω, 225mm)"
-    product_id: 0xA5225
+    product_id: 0xA225
 
   # Grey Water Tank - Channel A1
   - type: tank
@@ -290,7 +290,7 @@ sensors:
     fluid_type: waste_water
     update_interval: 3000
     product_name: "A5-E125 (0-190Ω, 125mm)"
-    product_id: 0xA5125
+    product_id: 0xA125
 ```
 
 ### Configuration Parameters
