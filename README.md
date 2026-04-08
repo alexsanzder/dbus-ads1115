@@ -137,6 +137,52 @@ For two tank sensors on channels A0 and A1:
 
 ## 📥 Installation
 
+### Prerequisites
+
+#### ⚠️ I2C Must Be Enabled (Fresh Venus OS Install)
+
+On a fresh Venus OS installation, **I2C is disabled by default**. The ADS1115 communicates over I2C, so it must be enabled before the service can read any sensor data. Without this, the tank will show **"Open Circuit"** even if wiring is correct.
+
+The `setup` script handles this automatically, but here is what it does and how to verify it manually:
+
+**What needs to happen:**
+
+| Requirement | Why |
+|---|---|
+| `dtparam=i2c_arm=on` in `/u-boot/config.txt` | Activates the I2C hardware pins on the GPIO header — persists across reboots and OTA firmware updates |
+| `i2c-dev` kernel module loaded | Exposes `/dev/i2c-1` device node to userspace so `smbus2` can open it |
+| `smbus2` Python library installed | Provides the pure-Python I2C access layer — re-installed by setup on every Venus OS firmware update |
+
+**To verify I2C is working after installation:**
+
+```bash
+# Confirm /dev/i2c-1 exists
+ls -la /dev/i2c-1
+
+# Scan I2C bus — ADS1115 should appear at 0x48
+i2cdetect -y 1
+
+# Expected output (0x48 = ADS1115):
+#      0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+# 40: -- -- -- -- -- -- -- -- 48 -- -- -- -- -- -- --
+```
+
+**If `/dev/i2c-1` is missing after running setup:**
+
+```bash
+# Re-run setup to re-apply the fix
+/data/dbus-ads1115/setup
+
+# Or manually enable and reboot
+echo "dtparam=i2c_arm=on" >> /u-boot/config.txt
+modprobe i2c-dev
+reboot
+```
+
+> **Note on boot config path:** Venus OS on Raspberry Pi 4 mounts the boot partition at `/u-boot/`. The setup script checks `/u-boot/config.txt`, `/boot/config.txt`, and `/mnt/boot/config.txt` in order and uses the first one it finds.
+
+---
+
 ### Method 1: Via PackageManager (Recommended)
 
 **Prerequisites:**

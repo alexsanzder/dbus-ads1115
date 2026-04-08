@@ -162,6 +162,18 @@ class SettingsDevice(object):
     def __getitem__(self, setting):
         return self._settings[setting].get_value()
 
+    def get(self, setting, default=None):
+        """Return the value for setting if it exists, otherwise return default.
+
+        Mirrors the dict.get() interface so callers can do:
+            value = self._settings.get('device_instance', fallback)
+        instead of catching KeyError from __getitem__.
+        """
+        try:
+            return self._settings[setting].get_value()
+        except (KeyError, Exception):
+            return default
+
     def __setitem__(self, setting, newvalue):
         result = self._settings[setting].set_value(newvalue)
         if result != 0:

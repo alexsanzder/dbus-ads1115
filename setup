@@ -8,7 +8,8 @@ packageLogFile="/var/log/dbus-ads1115/current"
 # Note: We do NOT load the ti-ads1015 kernel module.
 # That driver has multiplexing issues (unstable readings when switching channels)
 # and a broken IIO channel ordering on this hardware.
-# The service uses direct SMBus access instead (see service/run).
+# The service uses direct SMBus access via smbus2 which requires /dev/i2c-1.
+# I2C must be enabled in /boot/config.txt and the i2c-dev module must be loaded.
 
 #### running manually and OK to proceed - prompt for input
 if [ $scriptAction == 'NONE' ] ; then
@@ -23,9 +24,60 @@ fi
 if [ $scriptAction == 'INSTALL' ] ; then
 	logMessage "++ Installing dbus-ads1115 tank sensor service"
 
+	# -------------------------------------------------------------------------
+	# Enable I2C on Raspberry Pi / Venus OS
+	# smbus2 opens /dev/i2c-1 directly — this device only exists when:
+	#   1. dtparam=i2c_arm=on is set in /boot/config.txt (survives reboots)
+	#   2. The i2c-dev kernel module is loaded (gives userspace /dev/i2c-* nodes)
+	# -------------------------------------------------------------------------
+	logMessage "++ Enabling I2C hardware interface"
+
+	# Locate the boot config file.
+	# Venus OS on Raspberry Pi 4 mounts the boot partition at /u-boot (confirmed).
+	# Older/alternative setups may use /boot or /mnt/boot.
+	BOOT_CONFIG=""
+	for candidate in /u-boot/config.txt /boot/config.txt /mnt/boot/config.txt; do
+		if [ -f "$candidate" ]; then
+			BOOT_CONFIG="$candidate"
+			break
+		fi
+	done
+
+	if [ -n "$BOOT_CONFIG" ]; then
+		# Add dtparam=i2c_arm=on if not already present
+		if ! grep -q "^dtparam=i2c_arm=on" "$BOOT_CONFIG"; then
+			# Remove any commented-out or disabled i2c_arm line first to avoid duplicates
+			sed -i '/^#*dtparam=i2c_arm/d' "$BOOT_CONFIG"
+			echo "dtparam=i2c_arm=on" >> "$BOOT_CONFIG"
+			logMessage "++ Added dtparam=i2c_arm=on to $BOOT_CONFIG (reboot required)"
+		else
+			logMessage "++ dtparam=i2c_arm=on already set in $BOOT_CONFIG"
+		fi
+	else
+		logMessage "WARNING: Could not find /boot/config.txt - I2C may not be enabled after reboot"
+	fi
+
+	# Load i2c-dev module now (provides /dev/i2c-* without reboot)
+	if ! lsmod | grep -q "^i2c_dev"; then
+		modprobe i2c-dev 2>/dev/null \
+			&& logMessage "++ Loaded i2c-dev kernel module" \
+			|| logMessage "WARNING: Could not load i2c-dev module - /dev/i2c-1 may not exist"
+	else
+		logMessage "++ i2c-dev kernel module already loaded"
+	fi
+
+	# Verify /dev/i2c-1 is now available
+	if [ -e /dev/i2c-1 ]; then
+		logMessage "++ /dev/i2c-1 is available - I2C ready"
+	else
+		logMessage "WARNING: /dev/i2c-1 not found after loading i2c-dev - a reboot may be required"
+	fi
+
+	# -------------------------------------------------------------------------
 	# Install smbus2 Python library (required for direct SMBus ADC access).
 	# This must run on every install/firmware-update because pip3-installed packages
 	# live on the rootfs and are wiped when Venus OS updates.
+	# -------------------------------------------------------------------------
 	logMessage "++ Installing smbus2 Python library"
 	pip3 install smbus2 --break-system-packages 2>/dev/null \
 		|| pip3 install smbus2 2>/dev/null \
