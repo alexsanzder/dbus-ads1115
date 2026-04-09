@@ -348,7 +348,13 @@ class TankSensor:
         }
         self._settings = self._attach_to_settings(self._settings_base, self._setting_changed)
 
-        # Read DeviceInstance from settings (may have been changed by user in GUI)
+        # Read persisted values back from settings so that user calibration
+        # (set via the GUI) survives a service restart or reboot.
+        # These reads MUST happen before _attach_to_dbus() so that the D-Bus
+        # paths are initialised with the correct stored values rather than the
+        # config.yml defaults that were used as the AddSetting seed values.
+
+        # DeviceInstance
         try:
             stored_instance = self._settings.get('device_instance', self._device_instance)
             if stored_instance != self._device_instance:
@@ -357,7 +363,76 @@ class TankSensor:
         except Exception as e:
             logger.warning(f"Could not read DeviceInstance from settings: {e}, using default {self._device_instance}")
 
-        # Now create D-Bus service with correct DeviceInstance
+        # Calibration: RawValueEmpty / RawValueFull
+        # The _settings_base seed values are the config.yml defaults.  If the
+        # user already calibrated the sensor the stored value will differ — read
+        # it back here so _attach_to_dbus() publishes the right Ω values.
+        try:
+            stored_empty = self._settings.get('raw_value_empty', None)
+            if stored_empty is not None:
+                stored_empty = round(float(stored_empty), 1)
+                if stored_empty != self._sensor_min:
+                    logger.info(
+                        f"Tank '{self._name}': RawValueEmpty restored from settings "
+                        f"({stored_empty}Ω) — overrides config default ({self._sensor_min}Ω)"
+                    )
+                self._sensor_min = stored_empty
+        except Exception as e:
+            logger.warning(f"Could not read raw_value_empty from settings: {e}")
+
+        try:
+            stored_full = self._settings.get('raw_value_full', None)
+            if stored_full is not None:
+                stored_full = round(float(stored_full), 1)
+                if stored_full != self._sensor_max:
+                    logger.info(
+                        f"Tank '{self._name}': RawValueFull restored from settings "
+                        f"({stored_full}Ω) — overrides config default ({self._sensor_max}Ω)"
+                    )
+                self._sensor_max = stored_full
+        except Exception as e:
+            logger.warning(f"Could not read raw_value_full from settings: {e}")
+
+        # Standard preset
+        try:
+            stored_standard = self._settings.get('standard', None)
+            if stored_standard is not None:
+                stored_standard = int(stored_standard)
+                if stored_standard != self._standard:
+                    logger.info(
+                        f"Tank '{self._name}': Standard preset restored from settings "
+                        f"({stored_standard}) — overrides default ({self._standard})"
+                    )
+                self._standard = stored_standard
+                # If a named preset was stored, apply its fixed Ω ranges UNLESS
+                # the user also stored explicit RawValueEmpty/Full values (Custom).
+                # For European/US we always re-apply the preset so the ranges
+                # stay consistent even if the config.yml defaults differ.
+                if self._standard in TankSensor._STANDARD_RANGES:
+                    s_min, s_max = TankSensor._STANDARD_RANGES[self._standard]
+                    self._sensor_min = s_min
+                    self._sensor_max = s_max
+                    logger.info(
+                        f"Tank '{self._name}': Standard {self._standard} preset ranges applied "
+                        f"→ sensor_min={s_min}Ω, sensor_max={s_max}Ω"
+                    )
+        except Exception as e:
+            logger.warning(f"Could not read standard from settings: {e}")
+
+        # Shape
+        try:
+            stored_shape = self._settings.get('shape', None)
+            if stored_shape:
+                self._shape_str = stored_shape
+                self._shape = TankSensor._parse_shape(stored_shape)
+                logger.info(
+                    f"Tank '{self._name}': Shape restored from settings "
+                    f"→ {len(self._shape)} point(s): {stored_shape!r}"
+                )
+        except Exception as e:
+            logger.warning(f"Could not read shape from settings: {e}")
+
+        # Now create D-Bus service with correct DeviceInstance and calibration values
         self._dbus = self._attach_to_dbus(dbus)
 
     def _create_dbus_connection(self):
