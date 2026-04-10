@@ -25,6 +25,16 @@ if [ $scriptAction == 'INSTALL' ] ; then
 	logMessage "++ Installing dbus-ads1115 tank sensor service"
 
 	# -------------------------------------------------------------------------
+	# Preserve user config: create config.yml from example if it doesn't exist.
+	# This file is excluded from release tarballs via .gitattributes (export-ignore)
+	# so PackageManager updates never overwrite user configuration.
+	# -------------------------------------------------------------------------
+	if [ ! -f "/data/$packageName/config.yml" ] && [ -f "/data/$packageName/config.yml.example" ]; then
+		cp "/data/$packageName/config.yml.example" "/data/$packageName/config.yml"
+		logMessage "++ Created config.yml from template (customize for your setup)"
+	fi
+
+	# -------------------------------------------------------------------------
 	# Enable I2C on Raspberry Pi / Venus OS
 	# smbus2 opens /dev/i2c-1 directly — this device only exists when:
 	#   1. dtparam=i2c_arm=on is set in /boot/config.txt (survives reboots)

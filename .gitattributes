@@ -1,0 +1,3 @@
+# Exclude user-editable config from release tarballs
+# This prevents PackageManager from overwriting config.yml on updates
+config.yml export-ignore

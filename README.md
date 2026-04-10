@@ -157,6 +157,8 @@ Download the release archive from the [releases page](https://github.com/alexsan
 
 When using PackageManager/SetupHelper, the driver reinstalls automatically after every Venus OS firmware update. No manual steps needed.
 
+> **Your `config.yml` is preserved across updates.** The file is excluded from release tarballs, so PackageManager never overwrites it. On first install, `config.yml.example` is copied to `config.yml` if it doesn't already exist.
+
 ---
 
 ## ⚙️ Configuration (`config.yml`)
