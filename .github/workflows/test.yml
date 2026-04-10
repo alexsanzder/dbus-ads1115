@@ -26,31 +26,15 @@ jobs:
         python -m pip install --upgrade pip
         pip install pytest pytest-mock
 
-    - name: Add package to PYTHONPATH
+    - name: Run full test suite
       run: |
-        echo "PYTHONPATH: $PYTHONPATH"
-        echo "Adding current directory to PYTHONPATH"
         export PYTHONPATH="$(pwd):$PYTHONPATH"
-        echo "PYTHONPATH=$PYTHONPATH" >> $GITHUB_ENV
-
-    - name: Run tests (YAML parser and enums)
-      run: |
-        pytest tests/test_yaml_parser.py tests/test_enums.py -v --tb=short
-
-    - name: Test summary
-      if: always()
-      run: |
-        echo "Test Summary:"
-        echo "- YAML Parser: 25 tests"
-        echo "- Enums: 20 tests"
-        echo "- Total: 45 tests (all currently passing)"
-        echo ""
-        echo "All tests passing - ready for release!"
+        pytest tests/ -v --tb=short
 
   release-check:
     runs-on: ubuntu-latest
     needs: test
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
