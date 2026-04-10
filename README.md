@@ -149,7 +149,7 @@ Download the release archive from the [releases page](https://github.com/alexsan
 
 ### After Installation
 
-1. Edit `/data/dbus-ads1115/config.yml` to match your sensor wiring and tank capacity.
+1. Edit `/data/dbus-ads1115/config.ini` to match your sensor wiring and tank capacity.
 2. Restart the service: `svc -t /service/dbus-ads1115`
 3. The sensor appears in `Settings → Devices` within a few seconds.
 
@@ -157,51 +157,75 @@ Download the release archive from the [releases page](https://github.com/alexsan
 
 When using PackageManager/SetupHelper, the driver reinstalls automatically after every Venus OS firmware update. No manual steps needed.
 
-> **Your `config.yml` is preserved across updates.** The file is excluded from release tarballs, so PackageManager never overwrites it. On first install, `config.yml.example` is copied to `config.yml` if it doesn't already exist.
+> **Your `config.ini` is preserved across updates.** The file is excluded from release tarballs, so PackageManager never overwrites it. On first install, `config.ini` is automatically created from `config.default.ini` if it doesn't already exist.
 
 ---
 
-## ⚙️ Configuration (`config.yml`)
+## ⚙️ Configuration
 
-Edit `/data/dbus-ads1115/config.yml` to define your sensors.
+The driver uses **two layered INI files** — the same convention as the popular [dbus-serialbattery](https://github.com/mr-manuel/venus-os_dbus-serialbattery) driver:
 
-```yaml
-i2c:
-  bus: 1
-  address: 0x48
-  reference_voltage: 3.3
+| File | Purpose | Updated by |
+|------|---------|-----------|
+| `config.default.ini` | All settings with documented defaults | Every release (do not edit) |
+| `config.ini` | Your overrides only | You |
 
-sensors:
-  # Fresh Water Tank — Channel A0
-  - type: tank
-    enabled: true
-    name: "Fresh Water Tank"
-    channel: 0
-    fixed_resistor: 220        # Pull-up resistor in Ω
-    sensor_min: 0.0            # Resistance at EMPTY in Ω (initial default)
-    sensor_max: 190.0          # Resistance at FULL  in Ω (initial default)
-    tank_capacity: 70          # Capacity in your chosen unit
-    volume_unit: liters        # liters | cubic_meters | gallons_us | gallons_imp
-    fluid_type: fresh_water
-    update_interval: 3000      # ms between readings
-    product_name: "A5-E225 (0-190Ω, 225mm)"
-    product_id: 0xE225
+On every startup the driver reads `config.default.ini` first, then `config.ini` on top. You only need to put the values you actually want to change into `config.ini`.
 
-  # Grey Water Tank — Channel A1
-  - type: tank
-    enabled: false             # Set to true when sensor is wired
-    name: "Grey Water Tank"
-    channel: 1
-    fixed_resistor: 220
-    sensor_min: 0.0
-    sensor_max: 190.0
-    tank_capacity: 70
-    volume_unit: liters
-    fluid_type: waste_water
-    update_interval: 3000
-    product_name: "A5-E125 (0-190Ω, 125mm)"
-    product_id: 0xE125
+### config.ini — minimal example
+
+```ini
+; Only override what you need — everything else comes from config.default.ini
+
+[sensor0]
+name          = Fresh Water Tank
+tank_capacity = 150
+volume_unit   = liters
+sensor_min    = 0.0
+sensor_max    = 190.0
+
+[sensor1]
+name          = Grey Water Tank
+tank_capacity = 80
+volume_unit   = liters
+sensor_min    = 0.0
+sensor_max    = 190.0
+enabled       = true
 ```
+
+### config.default.ini — full reference
+
+All available options with their defaults and descriptions are in `config.default.ini`. Open it to see every parameter:
+
+```ini
+[i2c]
+bus               = 1       ; I2C bus number (/dev/i2c-1)
+address           = 0x48    ; ADS1115 chip address
+reference_voltage = 3.3     ; Supply voltage in Volts
+
+[sensor0]
+type            = tank
+enabled         = true
+name            = Fresh Water Tank
+channel         = 0         ; ADS1115 input: 0=A0, 1=A1, 2=A2, 3=A3
+fixed_resistor  = 220       ; Pull-up resistor to 3.3V in Ohms
+pga             = 2.048     ; Programmable Gain Amplifier full-scale voltage
+sensor_min      = 0.0       ; Sensor resistance at EMPTY (Ohms)
+sensor_max      = 190.0     ; Sensor resistance at FULL  (Ohms)
+tank_capacity   = 70        ; Capacity in the unit chosen by volume_unit
+volume_unit     = liters    ; liters | cubic_meters | gallons_us | gallons_imp
+fluid_type      = fresh_water
+update_interval = 3000      ; Milliseconds between ADC reads
+product_name    = A5-E225 (0-190Ohm, 225mm)
+product_id      = 0xE225
+
+; Low-level alarm
+alarm_low_enable  = true
+alarm_low_active  = 20      ; Trigger when level < 20%
+alarm_low_restore = 25      ; Clear when level > 25%
+```
+
+> Sensors `sensor2` and `sensor3` are commented out in `config.default.ini`. Uncomment and configure them to add a third or fourth tank.
 
 ### Configuration Parameters
 
@@ -227,26 +251,27 @@ sensors:
 
 ### Per-Sensor Alarms
 
-```yaml
-alarms:
-  low:
-    enable: true
-    active: 20       # Trigger when level < 20%
-    restore: 25      # Clear when level > 25%
-    delay: 30        # Seconds before triggering (prevents flapping)
-  high:
-    enable: true
-    active: 90       # Trigger when level > 90%
-    restore: 85      # Clear when level < 85%
-    delay: 5
+```ini
+[sensor0]
+; Low-level alarm — warn when tank runs low
+alarm_low_enable  = true
+alarm_low_active  = 20      ; Trigger when level < 20%
+alarm_low_restore = 25      ; Clear when level > 25%
+alarm_low_delay   = 30      ; Seconds before triggering (prevents flapping)
+
+; High-level alarm — warn when tank is nearly full (grey water)
+alarm_high_enable  = true
+alarm_high_active  = 90     ; Trigger when level > 90%
+alarm_high_restore = 85     ; Clear when level < 85%
+alarm_high_delay   = 5
 ```
 
 | Parameter | Description |
 |---|---|
-| `enable` | `true` to activate this alarm |
-| `active` | Level % that triggers the alarm |
-| `restore` | Level % that clears the alarm |
-| `delay` | Seconds to wait before triggering |
+| `alarm_low_enable` / `alarm_high_enable` | `true` to activate this alarm |
+| `alarm_low_active` / `alarm_high_active` | Level % that triggers the alarm |
+| `alarm_low_restore` / `alarm_high_restore` | Level % that clears the alarm |
+| `alarm_low_delay` / `alarm_high_delay` | Seconds to wait before triggering |
 
 ### Fluid Types
 
@@ -268,7 +293,7 @@ alarms:
 
 ## 🔧 Calibration
 
-### Option A — `config.yml` (before first install)
+### Option A — `config.ini` (before first install)
 
 1. Measure sensor resistance with a multimeter at **empty** → set `sensor_min`
 2. Measure at **full** → set `sensor_max`

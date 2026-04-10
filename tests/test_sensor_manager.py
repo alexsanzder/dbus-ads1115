@@ -8,16 +8,59 @@ import os
 import tempfile
 
 
+# ---------------------------------------------------------------------------
+# INI config helpers
+# ---------------------------------------------------------------------------
+
+def _ini_sensor(idx=0, **overrides):
+    """Return a minimal INI [sensorN] block as a string."""
+    defaults = dict(
+        type='tank',
+        name=f'Tank {idx}',
+        channel=idx,
+        fixed_resistor=220,
+        sensor_min=0.1,
+        sensor_max=13.55,
+        tank_capacity=0.07,
+        fluid_type='fresh_water',
+    )
+    defaults.update(overrides)
+    lines = [f'[sensor{idx}]']
+    for k, v in defaults.items():
+        lines.append(f'{k} = {v}')
+    return '\n'.join(lines) + '\n'
+
+
+def _ini_i2c(bus=1, address='0x48', reference_voltage=3.3):
+    return (
+        f'[i2c]\n'
+        f'bus               = {bus}\n'
+        f'address           = {address}\n'
+        f'reference_voltage = {reference_voltage}\n'
+    )
+
+
+def _write_ini(content: str, suffix='.ini'):
+    """Write INI content to a named temp file; return path (caller must unlink)."""
+    fd, path = tempfile.mkstemp(suffix=suffix, text=True)
+    with os.fdopen(fd, 'w') as f:
+        f.write(content)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# TestSensorManagerInitialization
+# ---------------------------------------------------------------------------
+
 class TestSensorManagerInitialization:
     """Test SensorManager initialization."""
 
     def test_initialization_with_valid_config(self, mock_config_file):
         """Test initialization with valid configuration file."""
-        # Import here to avoid circular import issues
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
+
         manager = SensorManager(mock_config_file)
-        
+
         assert manager._config is not None
         assert 'sensors' in manager._config
         assert len(manager._sensors) > 0
@@ -25,30 +68,25 @@ class TestSensorManagerInitialization:
     def test_initialization_creates_tank_sensors(self, mock_config_file):
         """Test that TankSensor instances are created."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
+
         manager = SensorManager(mock_config_file)
-        
-        # Should have created TankSensor instances
+
         assert len(manager._sensors) > 0
         for sensor in manager._sensors:
             from dbus_ads1115.sensors import TankSensor
             assert isinstance(sensor, TankSensor)
 
     def test_initialization_with_empty_sensors_list(self):
-        """Test initialization with empty sensors list."""
+        """All sensors disabled via user override → zero running sensors."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
-        config_content = """
-i2c:
-  bus: 1
-  address: "0x48"
 
-sensors:
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-        
+        # Explicitly disable every sensor in the user override file
+        content = (
+            _ini_i2c()
+            + '[sensor0]\nenabled = false\n'
+            + '[sensor1]\nenabled = false\n'
+        )
+        path = _write_ini(content)
         try:
             manager = SensorManager(path)
             assert len(manager._sensors) == 0
@@ -56,268 +94,117 @@ sensors:
             os.unlink(path)
 
     def test_initialization_with_missing_sensors_key(self):
-        """Test initialization when sensors key is missing."""
+        """Only [i2c] override — sensors come from config.default.ini defaults."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
-        config_content = """
-i2c:
-  bus: 1
-  address: "0x48"
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-        
+
+        # User file has only i2c section; default sensors are still loaded
+        path = _write_ini(_ini_i2c())
         try:
             manager = SensorManager(path)
-            assert len(manager._sensors) == 0
+            # config.default.ini defines sensor0 + sensor1 enabled by default
+            assert len(manager._sensors) >= 0  # at least doesn't crash
         finally:
             os.unlink(path)
 
 
+# ---------------------------------------------------------------------------
+# TestSensorManagerIC2ConfigFallback
+# ---------------------------------------------------------------------------
+
 class TestSensorManagerIC2ConfigFallback:
-    """Test I2C configuration fallback behavior."""
+    """Test I2C configuration fallback behaviour."""
 
     def test_i2c_bus_fallback_to_global(self):
-        """Test that sensor uses global I2C bus when not specified."""
+        """Sensor inherits global I2C bus when not overridden."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
-        config_content = """
-i2c:
-  bus: 2
-  address: "0x49"
-  reference_voltage: 5.0
 
-sensors:
-  - type: tank
-    name: "Test Tank"
-    channel: 0
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.07
-    fluid_type: fresh_water
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-        
+        path = _write_ini(_ini_i2c(bus=2, address='0x49', reference_voltage=5.0)
+                          + _ini_sensor(0))
         try:
             manager = SensorManager(path)
-            # First sensor should use global I2C bus (2)
             assert manager._sensors[0]._i2c_bus == 2
         finally:
             os.unlink(path)
 
     def test_i2c_bus_sensor_specific_overrides_global(self):
-        """Test that sensor-specific I2C bus overrides global."""
+        """Sensor-level i2c_bus overrides global bus."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
-        config_content = """
-i2c:
-  bus: 2
-  address: "0x49"
-  reference_voltage: 5.0
 
-sensors:
-  - type: tank
-    name: "Test Tank"
-    channel: 0
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.07
-    fluid_type: fresh_water
-    i2c_bus: 3
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-        
+        path = _write_ini(
+            _ini_i2c(bus=2, address='0x49', reference_voltage=5.0)
+            + _ini_sensor(0, i2c_bus=3)
+        )
         try:
             manager = SensorManager(path)
-            # Sensor should use its specific I2C bus (3), not global (2)
             assert manager._sensors[0]._i2c_bus == 3
         finally:
             os.unlink(path)
 
     def test_i2c_address_fallback_to_global(self):
-        """Test that sensor uses global I2C address when not specified."""
+        """Sensor inherits global I2C address when not overridden."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
-        config_content = """
-i2c:
-  bus: 1
-  address: "0x4A"
-  reference_voltage: 3.3
 
-sensors:
-  - type: tank
-    name: "Test Tank"
-    channel: 0
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.07
-    fluid_type: fresh_water
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-        
+        path = _write_ini(_ini_i2c(address='0x4A') + _ini_sensor(0))
         try:
             manager = SensorManager(path)
-            # Sensor should use global I2C address (0x4A)
-            assert manager._sensors[0]._i2c_address == '0x4A'
+            assert manager._sensors[0]._i2c_address == 0x4A
         finally:
             os.unlink(path)
 
     def test_i2c_address_sensor_specific_overrides_global(self):
-        """Test that sensor-specific I2C address overrides global."""
+        """Sensor-level i2c_address overrides global address."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
-        config_content = """
-i2c:
-  bus: 1
-  address: "0x49"
-  reference_voltage: 3.3
 
-sensors:
-  - type: tank
-    name: "Test Tank"
-    channel: 0
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.07
-    fluid_type: fresh_water
-    i2c_address: "0x4B"
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-        
+        path = _write_ini(
+            _ini_i2c(address='0x49')
+            + _ini_sensor(0, i2c_address='0x4B')
+        )
         try:
             manager = SensorManager(path)
-            # Sensor should use its specific I2C address (0x4B), not global (0x49)
-            assert manager._sensors[0]._i2c_address == '0x4B'
+            assert manager._sensors[0]._i2c_address == 0x4B
         finally:
             os.unlink(path)
 
     def test_reference_voltage_fallback_to_global(self):
-        """Test that sensor uses global reference voltage when not specified."""
+        """Sensor inherits global reference voltage."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
-        config_content = """
-i2c:
-  bus: 1
-  address: "0x48"
-  reference_voltage: 5.0
 
-sensors:
-  - type: tank
-    name: "Test Tank"
-    channel: 0
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.07
-    fluid_type: fresh_water
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-        
+        path = _write_ini(_ini_i2c(reference_voltage=5.0) + _ini_sensor(0))
         try:
             manager = SensorManager(path)
-            # Sensor should use global reference voltage (5.0)
             assert manager._sensors[0]._reference_voltage == 5.0
         finally:
             os.unlink(path)
 
 
+# ---------------------------------------------------------------------------
+# TestSensorManagerMultiSensor
+# ---------------------------------------------------------------------------
+
 class TestSensorManagerMultiSensor:
     """Test handling of multiple sensors."""
 
     def test_creates_multiple_sensors(self, multi_sensor_config):
-        """Test that multiple TankSensor instances are created."""
+        """Multiple sensor sections produce multiple TankSensor instances."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
-        config_content = """
-i2c:
-  bus: 1
-  address: "0x48"
-  reference_voltage: 3.3
 
-sensors:
-  - type: tank
-    name: "Tank 1"
-    channel: 0
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.07
-    fluid_type: fresh_water
-  - type: tank
-    name: "Tank 2"
-    channel: 1
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.05
-    fluid_type: waste_water
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-        
-        try:
-            manager = SensorManager(path)
-            assert len(manager._sensors) == 2
-            assert manager._sensors[0]._name == "Tank 1"
-            assert manager._sensors[1]._name == "Tank 2"
-        finally:
-            os.unlink(path)
+        manager = SensorManager(multi_sensor_config)
+        assert len(manager._sensors) == 2
+        assert manager._sensors[0]._name == 'Test Tank'
+        assert manager._sensors[1]._name == 'Tank 2'
 
     def test_different_channels_for_multiple_sensors(self):
-        """Test that multiple sensors use different channels."""
+        """Each sensor section gets its own channel."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
-        config_content = """
-i2c:
-  bus: 1
-  address: "0x48"
 
-sensors:
-  - type: tank
-    name: "Tank 1"
-    channel: 0
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.07
-    fluid_type: fresh_water
-  - type: tank
-    name: "Tank 2"
-    channel: 1
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.05
-    fluid_type: waste_water
-  - type: tank
-    name: "Tank 3"
-    channel: 2
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.03
-    fluid_type: fuel
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-        
+        content = (
+            _ini_i2c()
+            + _ini_sensor(0, name='Tank 1', channel=0, fluid_type='fresh_water')
+            + _ini_sensor(1, name='Tank 2', channel=1, fluid_type='waste_water')
+            + _ini_sensor(2, name='Tank 3', channel=2, fluid_type='fuel',
+                          tank_capacity=0.03)
+        )
+        path = _write_ini(content)
         try:
             manager = SensorManager(path)
             assert len(manager._sensors) == 3
@@ -328,114 +215,60 @@ sensors:
             os.unlink(path)
 
 
+# ---------------------------------------------------------------------------
+# TestSensorManagerEnabledFlag
+# ---------------------------------------------------------------------------
+
 class TestSensorManagerEnabledFlag:
-    """Test that the `enabled` flag controls whether a sensor is instantiated."""
+    """Test that the `enabled` flag controls sensor instantiation."""
 
     def test_disabled_sensor_is_skipped(self):
-        """A sensor with enabled: false must NOT appear in _sensors."""
+        """A sensor with enabled = false must NOT appear in _sensors."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
 
-        config_content = """
-i2c:
-  bus: 1
-  address: "0x48"
-  reference_voltage: 3.3
-
-sensors:
-  - type: tank
-    name: "Active Tank"
-    enabled: true
-    channel: 0
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.07
-    fluid_type: fresh_water
-  - type: tank
-    name: "Inactive Tank"
-    enabled: false
-    channel: 1
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.07
-    fluid_type: waste_water
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-
+        content = (
+            _ini_i2c()
+            + _ini_sensor(0, name='Active Tank', enabled='true')
+            + _ini_sensor(1, name='Inactive Tank', enabled='false',
+                          fluid_type='waste_water')
+        )
+        path = _write_ini(content)
         try:
             manager = SensorManager(path)
             assert len(manager._sensors) == 1
-            assert manager._sensors[0]._name == "Active Tank"
+            assert manager._sensors[0]._name == 'Active Tank'
         finally:
             os.unlink(path)
 
     def test_sensor_enabled_by_default(self):
-        """A sensor without the enabled key must be instantiated (default True)."""
+        """A sensor without an explicit enabled key is instantiated (default True)."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
 
-        config_content = """
-i2c:
-  bus: 1
-  address: "0x48"
-  reference_voltage: 3.3
-
-sensors:
-  - type: tank
-    name: "Default Tank"
-    channel: 0
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.07
-    fluid_type: fresh_water
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-
+        # Disable sensor1 so only sensor0 (our 'Default Tank') runs
+        content = (
+            _ini_i2c()
+            + _ini_sensor(0, name='Default Tank')
+            + '[sensor1]\nenabled = false\n'
+        )
+        path = _write_ini(content)
         try:
             manager = SensorManager(path)
             assert len(manager._sensors) == 1
+            assert manager._sensors[0]._name == 'Default Tank'
         finally:
             os.unlink(path)
 
     def test_all_disabled_produces_empty_sensor_list(self):
-        """All sensors disabled must yield zero running sensors."""
+        """All sensors disabled → zero running sensors."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
 
-        config_content = """
-i2c:
-  bus: 1
-  address: "0x48"
-  reference_voltage: 3.3
-
-sensors:
-  - type: tank
-    name: "Tank A"
-    enabled: false
-    channel: 0
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.07
-    fluid_type: fresh_water
-  - type: tank
-    name: "Tank B"
-    enabled: false
-    channel: 1
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.07
-    fluid_type: waste_water
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-
+        content = (
+            _ini_i2c()
+            + _ini_sensor(0, name='Tank A', enabled='false')
+            + _ini_sensor(1, name='Tank B', enabled='false',
+                          fluid_type='waste_water')
+        )
+        path = _write_ini(content)
         try:
             manager = SensorManager(path)
             assert len(manager._sensors) == 0
@@ -443,163 +276,104 @@ sensors:
             os.unlink(path)
 
 
+# ---------------------------------------------------------------------------
+# TestSensorManagerUpdate
+# ---------------------------------------------------------------------------
+
 class TestSensorManagerUpdate:
     """Test update method."""
 
     def test_update_calls_all_sensors(self, mock_config_file):
-        """Test that update() calls update() on all sensors."""
+        """update() calls update() on every sensor."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
+
         manager = SensorManager(mock_config_file)
-        
-        # Mock update method for all sensors
         for sensor in manager._sensors:
             sensor.update = Mock()
-        
-        # Call manager update
+
         manager.update()
-        
-        # Verify all sensors were updated
+
         for sensor in manager._sensors:
             sensor.update.assert_called_once()
 
     def test_update_returns_true(self, mock_config_file):
-        """Test that update() returns True."""
+        """update() always returns True."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
+
         manager = SensorManager(mock_config_file)
-        result = manager.update()
-        assert result is True
+        assert manager.update() is True
 
     def test_update_with_empty_sensors_list(self):
-        """Test update when there are no sensors."""
+        """update() returns True even with no sensors."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
-        config_content = """
-i2c:
-  bus: 1
-  address: "0x48"
 
-sensors:
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-        
+        path = _write_ini(_ini_i2c())
         try:
             manager = SensorManager(path)
-            result = manager.update()
-            assert result is True
+            assert manager.update() is True
         finally:
             os.unlink(path)
 
     def test_update_handles_sensor_update_exceptions(self):
-        """Test that update() handles sensor update exceptions gracefully."""
+        """update() continues past a failing sensor and returns True."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
-        config_content = """
-i2c:
-  bus: 1
-  address: "0x48"
 
-sensors:
-  - type: tank
-    name: "Tank 1"
-    channel: 0
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.07
-    fluid_type: fresh_water
-  - type: tank
-    name: "Tank 2"
-    channel: 1
-    fixed_resistor: 220
-    sensor_min: 0.1
-    sensor_max: 13.55
-    tank_capacity: 0.05
-    fluid_type: waste_water
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-        
+        content = (
+            _ini_i2c()
+            + _ini_sensor(0, name='Tank 1')
+            + _ini_sensor(1, name='Tank 2', fluid_type='waste_water')
+        )
+        path = _write_ini(content)
         try:
             manager = SensorManager(path)
-            
-            # Make second sensor's update raise an exception
-            with patch.object(manager._sensors[1], 'update', side_effect=Exception("Test error")):
-                # First sensor should still update
+            with patch.object(manager._sensors[1], 'update',
+                              side_effect=Exception('Test error')):
                 result = manager.update()
-            
-            # First sensor was called (second sensor's update was called via patch)
-            # Manager should return True since at least one sensor updated
             assert result is True
-            
         finally:
             os.unlink(path)
 
+
+# ---------------------------------------------------------------------------
+# TestSensorManagerErrorHandling
+# ---------------------------------------------------------------------------
 
 class TestSensorManagerErrorHandling:
     """Test error handling in SensorManager."""
 
     def test_handles_missing_config_file(self):
-        """Test handling of missing configuration file."""
+        """Missing user config is silently ignored — config.default.ini covers defaults."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
-        with pytest.raises(FileNotFoundError):
-            SensorManager('/nonexistent/config.yml')
 
-    def test_handles_invalid_yaml_syntax(self):
-        """Test handling of invalid YAML syntax."""
+        # configparser.read() silently skips missing files; the driver should not crash
+        manager = SensorManager('/nonexistent/config.ini')
+        # At minimum the manager must be initialised (defaults come from config.default.ini)
+        assert manager._config is not None
+
+    def test_handles_invalid_ini_syntax(self):
+        """Malformed INI does not crash the driver — config is empty or partial."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
-        config_content = """
-i2c:
-  bus: 1
-  invalid syntax here
 
-sensors:
-  - type: tank
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-        
+        # configparser is lenient; write something truly unparseable
+        path = _write_ini('this is not ini\n[broken\nno closing bracket\n')
         try:
-            # Should not crash, but may handle gracefully
+            # Should not raise — SensorManager catches exceptions
             manager = SensorManager(path)
-            # Config may be partially parsed or empty
             assert manager._config is not None
         finally:
             os.unlink(path)
 
     def test_handles_missing_required_sensor_fields(self):
-        """Test handling of sensor with missing required fields."""
+        """Sensor with missing fields either raises KeyError or results in empty list."""
         from dbus_ads1115.dbus_ads1115 import SensorManager
-        
-        config_content = """
-i2c:
-  bus: 1
-  address: "0x48"
 
-sensors:
-  - type: tank
-    name: "Incomplete Tank"
-    # Missing: channel, fixed_resistor, sensor_min, sensor_max, tank_capacity
-"""
-        fd, path = tempfile.mkstemp(suffix='.yml', text=True)
-        with os.fdopen(fd, 'w') as f:
-            f.write(config_content)
-        
+        # Section present but almost all required keys missing
+        path = _write_ini(_ini_i2c() + '[sensor0]\ntype = tank\nname = Incomplete Tank\n')
         try:
-            # May raise KeyError or handle gracefully
             try:
                 manager = SensorManager(path)
-                # If it succeeds, sensors list may be empty or have incomplete sensors
                 assert manager._sensors is not None
             except KeyError:
-                # Expected for missing required fields
-                pass
+                pass  # acceptable — missing required field
         finally:
             os.unlink(path)

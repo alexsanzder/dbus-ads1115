@@ -1,15 +1,14 @@
 #!/usr/bin/python3 -u
 import sys
 import os
-import re
+import configparser
 import logging
-from datetime import datetime
 from argparse import ArgumentParser
 
 # Configure logging at the top to catch all initialization messages
 parser = ArgumentParser(description='dbus-ads1115')
 parser.add_argument('-d', '--debug', action='store_true', help='Enable debug logging')
-parser.add_argument('-c', '--config', default='config.yml', help='Path to config file')
+parser.add_argument('-c', '--config', default='config.ini', help='Path to user config file (default: config.ini). Layered on top of config.default.ini.')
 # Use a temporary parse to get log level before full initialization
 temp_args, _ = parser.parse_known_args()
 logging.basicConfig(level=(logging.DEBUG if temp_args.debug else logging.INFO),
@@ -46,58 +45,98 @@ except Exception:
 
     GLib = _StubGLib()
 
-# Internal YAML Parser (for systems without PyYAML)
-def parse_simple_yaml(content):
-    def parse_value(v):
-        v = v.strip()
-        if v.lower() == 'true': return True
-        if v.lower() == 'false': return False
-        try: return int(v)
-        except ValueError:
-            try: return float(v)
-            except ValueError: return v.strip('"\'')
+# ---------------------------------------------------------------------------
+# Config loader — INI format (configparser), layered:
+#   config.default.ini  — shipped with the package (all keys + defaults)
+#   config.ini          — user overrides (preserved across updates)
+#
+# Following the convention established by dbus-serialbattery and other
+# popular Venus OS community drivers.
+# ---------------------------------------------------------------------------
 
-    config = {}
-    stack = [(None, config)]
-    for line in content.split('\n'):
-        line = line.split('#')[0].rstrip()
-        if not line: continue
-        indent = len(line) - len(line.lstrip())
-        level = indent // 2
-        stripped = line.strip()
-        while len(stack) > level + 1: stack.pop()
-        _, current = stack[-1]
-        
-        m = re.match(r'^(\w+)\s*:\s*$', stripped)
-        if m:
-            name = m.group(1)
-            current[name] = [] if name == 'sensors' else {}
-            stack.append((name, current[name]))
+SENSOR_SECTIONS = [f'sensor{i}' for i in range(4)]  # sensor0 … sensor3
+
+def _load_config(user_config_path: str) -> dict:
+    """
+    Parse the layered INI config and return a normalised dict that the rest
+    of the code can consume without knowing it came from configparser.
+
+    Structure returned:
+        {
+            'i2c': { 'bus': 1, 'address': '0x48', 'reference_voltage': 3.3 },
+            'sensors': [
+                { 'type': 'tank', 'name': '...', 'channel': 0, ... },
+                ...
+            ]
+        }
+    """
+    cfg = configparser.ConfigParser(
+        # Keep keys case-sensitive (product_name, etc.)
+        # configparser lower-cases by default — override that
+        inline_comment_prefixes=(';', '#'),
+        comment_prefixes=(';', '#'),
+        strict=True,
+    )
+    cfg.optionxform = str  # preserve key case
+
+    # Locate config.default.ini relative to this file
+    _here = os.path.dirname(os.path.abspath(__file__))
+    _pkg_root = os.path.dirname(_here)
+    default_ini = os.path.join(_pkg_root, 'config.default.ini')
+
+    files_read = cfg.read([default_ini, user_config_path])
+    if not files_read:
+        raise FileNotFoundError(
+            f"No config files found. Looked for:\n  {default_ini}\n  {user_config_path}"
+        )
+
+    def _bool(val: str) -> bool:
+        return val.strip().lower() in ('true', '1', 'yes', 'on')
+
+    def _auto(val: str):
+        """Cast string to int / float / bool / str automatically."""
+        v = val.strip()
+        if v.lower() in ('true', 'yes', 'on'):  return True
+        if v.lower() in ('false', 'no', 'off'): return False
+        try:   return int(v, 0)          # handles 0x48 hex literals
+        except ValueError: pass
+        try:   return float(v)
+        except ValueError: pass
+        return v
+
+    # --- i2c section ---
+    i2c = {}
+    if cfg.has_section('i2c'):
+        for k, v in cfg.items('i2c'):
+            i2c[k] = _auto(v)
+
+    # --- sensor sections ---
+    sensors = []
+    for section in SENSOR_SECTIONS:
+        if not cfg.has_section(section):
             continue
-            
-        m = re.match(r'^-\s*(\w+)\s*:\s*(.*)$', stripped)
-        if m:
-            key, val = m.group(1), m.group(2).strip()
-            item = {key: parse_value(val)} if val else {key: {}}
-            current.append(item)
-            stack.append((key, item))
+        raw = dict(cfg.items(section))
+        if not _bool(raw.get('enabled', 'true')):
             continue
-            
-        m = re.match(r'^(\w+)\s*:\s*(.*)$', stripped)
-        if m:
-            key, val = m.group(1), m.group(2).strip()
-            current[key] = parse_value(val) if val else {}
-    return config
 
-class yaml_fallback:
-    @staticmethod
-    def safe_load(stream):
-        return parse_simple_yaml(stream.read())
+        sensor = {k: _auto(v) for k, v in raw.items()}
 
-try:
-    import yaml
-except ImportError:
-    yaml = yaml_fallback
+        # Flatten alarm keys:  alarm_low_enable → alarms.low.enable
+        alarms = {}
+        for level in ('low', 'high'):
+            entry = {}
+            for field in ('enable', 'active', 'restore', 'delay'):
+                key = f'alarm_{level}_{field}'
+                if key in sensor:
+                    entry[field] = sensor.pop(key)
+            if entry:
+                alarms[level] = entry
+        if alarms:
+            sensor['alarms'] = alarms
+
+        sensors.append(sensor)
+
+    return {'i2c': i2c, 'sensors': sensors}
 
 # Add parent directory to path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -117,13 +156,11 @@ except ImportError:
 
 class SensorManager:
     def __init__(self, config_filename):
-        with open(config_filename, "r") as stream:
-            try:
-                self._config = yaml.safe_load(stream)
-            except Exception:
-                # Malformed YAML or other read error: fall back to empty config
-                logging.exception("Failed to parse config file, using empty config")
-                self._config = {}
+        try:
+            self._config = _load_config(config_filename)
+        except Exception:
+            logging.exception("Failed to parse config file, using empty config")
+            self._config = {}
         self._sensors = []
         self._create_sensors()
 

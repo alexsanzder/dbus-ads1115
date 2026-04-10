@@ -19,4 +19,4 @@ fi
 
 # Start Python service
 cd /data/dbus-ads1115
-exec python3 -u -m dbus_ads1115.dbus_ads1115 -c config.yml
+exec python3 -u -m dbus_ads1115.dbus_ads1115 -c config.ini

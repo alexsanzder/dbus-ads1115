@@ -25,13 +25,15 @@ if [ $scriptAction == 'INSTALL' ] ; then
 	logMessage "++ Installing dbus-ads1115 tank sensor service"
 
 	# -------------------------------------------------------------------------
-	# Preserve user config: create config.yml from example if it doesn't exist.
-	# This file is excluded from release tarballs via .gitattributes (export-ignore)
+	# Preserve user config: create config.ini from config.default.ini if it
+	# doesn't already exist.
+	# config.ini is excluded from release tarballs via .gitattributes (export-ignore)
 	# so PackageManager updates never overwrite user configuration.
+	# config.default.ini ships with every release and contains all defaults.
 	# -------------------------------------------------------------------------
-	if [ ! -f "/data/$packageName/config.yml" ] && [ -f "/data/$packageName/config.yml.example" ]; then
-		cp "/data/$packageName/config.yml.example" "/data/$packageName/config.yml"
-		logMessage "++ Created config.yml from template (customize for your setup)"
+	if [ ! -f "/data/$packageName/config.ini" ] && [ -f "/data/$packageName/config.default.ini" ]; then
+		cp "/data/$packageName/config.default.ini" "/data/$packageName/config.ini"
+		logMessage "++ Created config.ini from defaults (customize for your setup)"
 	fi
 
 	# -------------------------------------------------------------------------

@@ -1,3 +1,4 @@
-# Exclude user-editable config from release tarballs
-# This prevents PackageManager from overwriting config.yml on updates
-config.yml export-ignore
+# Exclude user-editable config from release tarballs.
+# This prevents PackageManager from overwriting the user's config.ini on updates.
+# config.default.ini IS included — it ships with every release and contains all defaults.
+config.ini export-ignore
